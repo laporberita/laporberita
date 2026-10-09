@@ -1,1 +1,432 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard Admin — Lapor Berita</title><link rel="stylesheet" href="../assets/css/style.css"></head><body><div id="admin-shell"></div><main class="container page"><h1>Dashboard Admin</h1><div class="notice"><b>Mode prototipe:</b> halaman ini belum dilindungi login server. Jangan gunakan untuk mengelola data nyata sebelum autentikasi dan kebijakan backend diterapkan.</div><div class="stats"><div class="stat"><span>Artikel demo</span><b>3</b></div><div class="stat"><span>Laporan masuk</span><b>0</b></div><div class="stat"><span>Menunggu review</span><b>0</b></div></div><div class="admin-links"><a href="berita.html">Kelola Berita →</a><a href="laporan-masyarakat.html">Laporan Masyarakat →</a><a href="navigasi.html">Kelola Navigasi →</a><a href="halaman.html">Kelola Halaman →</a><a href="pengaturan.html">Pengaturan Website →</a></div></main><script src="../assets/js/admin.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#102a43">
+<meta name="description" content="LAPOR BERITA — Portal informasi, berita, dan laporan masyarakat Indonesia.">
+<title>LAPOR BERITA | Dari Masyarakat, Untuk Masyarakat</title>
+
+<style>
+:root {
+  --navy: #102a43;
+  --blue: #176b9b;
+  --red: #d92d36;
+  --ink: #172b3a;
+  --muted: #657786;
+  --line: #dce4ea;
+  --paper: #f4f7f9;
+  --white: #ffffff;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.6 system-ui, Arial, sans-serif;
+}
+a { color: inherit; text-decoration: none; }
+.container {
+  width: min(1120px, calc(100% - 32px));
+  margin: auto;
+}
+.header {
+  background: var(--navy);
+  color: white;
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--red);
+  color: white;
+}
+.brand b { color: #ff777c; }
+.tagline {
+  display: block;
+  color: #c8d8e5;
+  font-size: .72rem;
+  font-weight: 500;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--blue);
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+.btn-red { background: var(--red); }
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  border-top: 1px solid #29445c;
+  padding: 5px 0;
+}
+.nav a {
+  padding: 9px 11px;
+  border-radius: 6px;
+  font-size: .9rem;
+}
+.nav a:hover { background: #1a4566; }
+.ticker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+}
+.badge {
+  padding: 4px 9px;
+  border-radius: 5px;
+  background: var(--red);
+  color: white;
+  font-size: .75rem;
+  font-weight: 900;
+}
+.hero {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 20px;
+}
+.panel, .news-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: white;
+}
+.hero-art {
+  display: grid;
+  place-items: center;
+  min-height: 270px;
+  padding: 24px;
+  background: linear-gradient(135deg, #176b9b, #102a43);
+  color: white;
+  text-align: center;
+}
+.hero-art span {
+  font-size: clamp(2rem, 6vw, 4rem);
+  font-weight: 950;
+  letter-spacing: -.06em;
+}
+.hero-body { padding: 22px; }
+.eyebrow {
+  color: var(--blue);
+  font-size: .76rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+h1 {
+  margin: 9px 0;
+  font-size: clamp(1.9rem, 4vw, 2.8rem);
+  line-height: 1.15;
+}
+.muted { color: var(--muted); }
+.side { display: grid; gap: 13px; }
+.side-item { padding: 18px; }
+.side-item h3 { margin: 7px 0; line-height: 1.35; }
+.section { margin: 36px 0; }
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--navy);
+}
+.section-head h2 { margin: 0 0 9px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 17px;
+}
+.news-card { padding: 0; }
+.card-art {
+  display: grid;
+  place-items: center;
+  min-height: 135px;
+  background: linear-gradient(135deg, #dcecf5, #b7d5e5);
+  color: var(--navy);
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+.card-body { padding: 16px; }
+.card-body h3 { margin: 7px 0; line-height: 1.35; }
+.cta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin: 34px 0;
+  padding: 24px;
+  border-radius: 13px;
+  background: #e4f1f8;
+}
+.cta h2 { margin: 0; }
+.cta p { margin: 6px 0; }
+.footer {
+  margin-top: 44px;
+  padding: 32px 0;
+  background: var(--navy);
+  color: white;
+}
+.footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 24px;
+}
+.footer a {
+  display: block;
+  margin: 7px 0;
+  color: #d9e6ee;
+  font-size: .9rem;
+}
+.footer p { color: #c8d8e5; }
+.notice {
+  margin: 20px 0;
+  padding: 14px;
+  border-left: 4px solid #d99b27;
+  background: #fff7e5;
+  color: #634a17;
+  font-size: .88rem;
+}
+@media (max-width: 760px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .actions { width: 100%; }
+  .actions .btn { flex: 1; padding: 10px 8px; font-size: .83rem; }
+  .hero { grid-template-columns: 1fr; }
+  .hero-art { min-height: 190px; }
+  .grid { grid-template-columns: 1fr; }
+  .cta { align-items: flex-start; flex-direction: column; }
+  .footer-grid { grid-template-columns: 1fr; }
+  .nav a { padding: 8px; font-size: .83rem; }
+}
+</style>
+</head>
+
+<body>
+
+<header class="header">
+  <div class="container">
+    <div class="topbar">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">LB</span>
+        <span>
+          LAPOR <b>BERITA</b>
+          <span class="tagline">Dari Masyarakat, Untuk Masyarakat</span>
+        </span>
+      </a>
+      <div class="actions">
+        <a class="btn" href="pencarian.html">⌕ Cari Berita</a>
+        <a class="btn btn-red" href="laporkan-berita.html">＋ Laporkan Berita</a>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Navigasi utama">
+      <a href="index.html">Beranda</a>
+      <a href="berita.html">Berita</a>
+      <a href="kategori.html?nama=Nasional">Nasional</a>
+      <a href="kategori.html?nama=Daerah">Daerah</a>
+      <a href="kategori.html?nama=Politik">Politik</a>
+      <a href="kategori.html?nama=Ekonomi">Ekonomi</a>
+      <a href="kategori.html?nama=Pendidikan">Pendidikan</a>
+      <a href="tentang.html">Tentang</a>
+      <a href="kontak.html">Kontak</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+
+  <div class="ticker">
+    <span class="badge">INFORMASI</span>
+    <span>Berita yang baik dimulai dari sumber yang jelas dan pemeriksaan fakta.</span>
+  </div>
+
+  <section class="hero">
+    <article class="panel">
+      <div class="hero-art">
+        <span>LAPOR<br>BERITA</span>
+      </div>
+      <div class="hero-body">
+        <div class="eyebrow">Portal Informasi Independen</div>
+        <h1>Informasi, Fakta, dan Suara Masyarakat</h1>
+        <p class="muted">
+          Ruang untuk membaca informasi dan menyampaikan laporan kepada
+          redaksi secara bertanggung jawab. Setiap laporan perlu diverifikasi
+          sebelum diterbitkan.
+        </p>
+        <a class="btn btn-red" href="laporkan-berita.html">
+          Kirim Laporan Masyarakat →
+        </a>
+      </div>
+    </article>
+
+    <div class="side">
+      <article class="panel side-item">
+        <div class="eyebrow">Selamat Datang</div>
+        <h3>Portal LAPOR BERITA telah hadir</h3>
+        <p class="muted">
+          Baca informasi, jelajahi kategori, dan sampaikan informasi kepada redaksi.
+        </p>
+        <a href="berita.html">Jelajahi berita →</a>
+      </article>
+
+      <article class="panel side-item">
+        <div class="eyebrow">Berita Daerah</div>
+        <h3>Suara masyarakat perlu disampaikan secara bertanggung jawab</h3>
+        <p class="muted">
+          Sertakan kronologi dan sumber yang dapat diperiksa.
+        </p>
+        <a href="pedoman-media.html">Baca pedoman pemberitaan →</a>
+      </article>
+
+      <article class="panel side-item">
+        <div class="eyebrow">Layanan Masyarakat</div>
+        <h3>Punya informasi untuk redaksi?</h3>
+        <p class="muted">
+          Pelajari cara menyampaikan laporan untuk ditinjau redaksi.
+        </p>
+        <a href="laporkan-berita.html">Laporkan informasi →</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2>Jelajahi Kategori</h2>
+      <a href="berita.html">Semua berita →</a>
+    </div>
+
+    <div class="grid">
+      <a class="news-card" href="kategori.html?nama=Nasional">
+        <div class="card-art">NASIONAL</div>
+        <div class="card-body">
+          <h3>Berita Nasional</h3>
+          <p class="muted">Informasi dan perkembangan tingkat nasional.</p>
+        </div>
+      </a>
+
+      <a class="news-card" href="kategori.html?nama=Daerah">
+        <div class="card-art">DAERAH</div>
+        <div class="card-body">
+          <h3>Berita Daerah</h3>
+          <p class="muted">Peristiwa dan kabar dari lingkungan masyarakat.</p>
+        </div>
+      </a>
+
+      <a class="news-card" href="kategori.html?nama=Pendidikan">
+        <div class="card-art">PENDIDIKAN</div>
+        <div class="card-body">
+          <h3>Pendidikan</h3>
+          <p class="muted">Informasi sekolah, pembelajaran, dan pendidikan.</p>
+        </div>
+      </a>
+
+      <a class="news-card" href="kategori.html?nama=Politik">
+        <div class="card-art">POLITIK</div>
+        <div class="card-body">
+          <h3>Politik dan Pemerintahan</h3>
+          <p class="muted">Informasi kebijakan dan pelayanan publik.</p>
+        </div>
+      </a>
+
+      <a class="news-card" href="kategori.html?nama=Ekonomi">
+        <div class="card-art">EKONOMI</div>
+        <div class="card-body">
+          <h3>Ekonomi</h3>
+          <p class="muted">Informasi ekonomi dan perkembangan usaha.</p>
+        </div>
+      </a>
+
+      <a class="news-card" href="kategori.html?nama=Olahraga">
+        <div class="card-art">OLAHRAGA</div>
+        <div class="card-body">
+          <h3>Olahraga</h3>
+          <p class="muted">Informasi kompetisi dan kegiatan olahraga.</p>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div>
+      <h2>Laporkan informasi kepada redaksi</h2>
+      <p class="muted">
+        Setiap laporan perlu diperiksa sebelum menjadi berita publik.
+      </p>
+    </div>
+    <a class="btn btn-red" href="laporkan-berita.html">Buat Laporan →</a>
+  </section>
+
+  <div class="notice">
+    <strong>Pemberitahuan:</strong>
+    Halaman ini merupakan beranda awal. Data berita, formulir laporan,
+    autentikasi admin, dan database masih perlu diintegrasikan serta diuji.
+    Jangan mengirim NIK atau foto KTP melalui formulir sebelum keamanan
+    penyimpanan dan akses data benar-benar diterapkan.
+  </div>
+
+</main>
+
+<footer class="footer">
+  <div class="container footer-grid">
+    <div>
+      <div class="brand">
+        <span class="brand-mark">LB</span>
+        <span>LAPOR BERITA</span>
+      </div>
+      <p>Dari Masyarakat, Untuk Masyarakat.</p>
+      <p>Informasi bertanggung jawab, sumber jelas, dan verifikasi sebelum publikasi.</p>
+    </div>
+
+    <div>
+      <strong>Informasi</strong>
+      <a href="tentang.html">Tentang Kami</a>
+      <a href="pedoman-media.html">Pedoman Pemberitaan</a>
+      <a href="kebijakan-privasi.html">Kebijakan Privasi</a>
+    </div>
+
+    <div>
+      <strong>Layanan</strong>
+      <a href="laporkan-berita.html">Laporkan Berita</a>
+      <a href="koreksi-hak-jawab.html">Koreksi dan Hak Jawab</a>
+      <a href="kontak.html">Kontak Redaksi</a>
+      <a href="admin/index.html">Dashboard Admin</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
