@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -31,7 +30,11 @@ header {
   color:white;
   padding:18px;
 }
-.wrap { max-width:1100px; margin:auto; padding:18px; }
+.wrap {
+  max-width:1100px;
+  margin:auto;
+  padding:18px;
+}
 .brand { font-weight:900; font-size:21px; }
 .brand span { color:#ff777c; }
 header p { margin:4px 0; color:#d7e3ec; }
@@ -69,7 +72,11 @@ input,textarea,select {
   background:white;
 }
 textarea { min-height:130px; resize:vertical; }
-.row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.row {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
 .msg {
   padding:12px;
   border-radius:7px;
@@ -79,7 +86,11 @@ textarea { min-height:130px; resize:vertical; }
 }
 .small { font-size:13px; color:#647789; }
 .table-wrap { overflow-x:auto; }
-table { border-collapse:collapse; width:100%; min-width:620px; }
+table {
+  border-collapse:collapse;
+  width:100%;
+  min-width:620px;
+}
 th,td {
   text-align:left;
   padding:10px;
@@ -122,142 +133,152 @@ button:disabled { opacity:.6; cursor:wait; }
 
 <main class="wrap">
 
-  <section class="card" id="login-panel">
-    <h1>Login Admin</h1>
-    <p class="small">Masuk menggunakan akun admin yang terdaftar di Supabase.</p>
+<section class="card" id="login-panel">
+  <h1>Login Admin</h1>
+  <p class="small">
+    Masuk menggunakan akun admin yang terdaftar di Supabase.
+  </p>
 
-    <form id="login-form">
-      <label for="email">Email admin</label>
-      <input id="email" type="email"
-             autocomplete="username" required>
+  <form id="login-form">
+    <label for="email">Email admin</label>
+    <input id="email" type="email"
+      autocomplete="username" required>
 
-      <label for="password">Kata sandi</label>
-      <input id="password" type="password"
-             autocomplete="current-password" required>
+    <label for="password">Kata sandi</label>
+    <input id="password" type="password"
+      autocomplete="current-password" required>
+
+    <p>
+      <button class="btn" id="login-btn" type="submit">
+        Masuk
+      </button>
+    </p>
+  </form>
+
+  <div id="login-message" class="msg" role="status">
+    Memeriksa konfigurasi...
+  </div>
+</section>
+
+<section id="admin-panel" class="hidden">
+
+  <div class="card" id="dashboard">
+    <h1>Dashboard Admin</h1>
+    <p>Panel pengelolaan LAPOR BERITA.</p>
+    <div id="session-info" class="msg"></div>
+
+    <button class="btn gray" id="refresh-btn" type="button">
+      Muat Ulang Data
+    </button>
+    <button class="btn red" id="logout-btn" type="button">
+      Keluar
+    </button>
+  </div>
+
+  <div class="card" id="kelola">
+    <h2 id="form-title">Tambah Berita</h2>
+    <p class="small">
+      Periksa kebenaran berita dan sumbernya sebelum menerbitkan.
+    </p>
+
+    <form id="article-form">
+      <input type="hidden" id="article-id">
+
+      <label for="title">Judul berita</label>
+      <input id="title" maxlength="250" required>
+
+      <div class="row">
+        <div>
+          <label for="category">Kategori</label>
+          <select id="category">
+            <option value="">Tanpa kategori</option>
+          </select>
+        </div>
+        <div>
+          <label for="status">Status</label>
+          <select id="status">
+            <option value="draft">Draf</option>
+            <option value="review">Dalam pemeriksaan</option>
+            <option value="approved">Disetujui</option>
+            <option value="published">Terbit</option>
+            <option value="scheduled">Terjadwal</option>
+            <option value="archived">Arsip</option>
+          </select>
+        </div>
+      </div>
+
+      <label for="summary">Ringkasan berita</label>
+      <textarea id="summary" rows="3"></textarea>
+
+      <label for="body">Isi berita</label>
+      <textarea id="body" required></textarea>
+
+      <label for="source">Tautan sumber berita (opsional)</label>
+      <input id="source" type="url" placeholder="https://...">
+
+      <label for="image">Alamat gambar (opsional)</label>
+      <input id="image" type="url" placeholder="https://...">
 
       <p>
-        <button class="btn" id="login-btn" type="submit">Masuk</button>
+        <button class="btn" id="save-btn" type="submit">
+          Simpan Berita
+        </button>
+        <button class="btn gray" id="cancel-btn" type="button">
+          Batal Edit
+        </button>
       </p>
     </form>
 
-    <div id="login-message" class="msg" role="status">
-      Memeriksa konfigurasi...
+    <div id="article-message" class="msg" role="status">
+      Siap digunakan.
     </div>
-  </section>
+  </div>
 
-  <section id="admin-panel" class="hidden">
-
-    <div class="card" id="dashboard">
-      <h1>Dashboard Admin</h1>
-      <p>Panel pengelolaan LAPOR BERITA.</p>
-      <div id="session-info" class="msg"></div>
-      <button class="btn gray" id="refresh-btn" type="button">
-        Muat Ulang Data
-      </button>
-      <button class="btn red" id="logout-btn" type="button">
-        Keluar
-      </button>
+  <div class="card" id="daftar">
+    <h2>Daftar Berita</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Judul</th>
+            <th>Status</th>
+            <th>Tanggal</th>
+            <th>Tindakan</th>
+          </tr>
+        </thead>
+        <tbody id="article-list">
+          <tr><td colspan="4">Belum memuat data.</td></tr>
+        </tbody>
+      </table>
     </div>
+  </div>
 
-    <div class="card" id="kelola">
-      <h2 id="form-title">Tambah Berita</h2>
-      <p class="small">
-        Periksa kebenaran berita sebelum menerbitkannya.
-      </p>
+  <div class="card">
+    <h2>Laporan Masyarakat</h2>
+    <p>
+      Menu laporan masyarakat belum diaktifkan pada versi ini.
+      Identitas pelapor tidak ditampilkan atau diubah melalui halaman ini.
+    </p>
+  </div>
 
-      <form id="article-form">
-        <input type="hidden" id="article-id">
-
-        <label for="title">Judul berita</label>
-        <input id="title" maxlength="250" required>
-
-        <div class="row">
-          <div>
-            <label for="category">Kategori</label>
-            <select id="category">
-              <option value="">Tanpa kategori</option>
-            </select>
-          </div>
-          <div>
-            <label for="status">Status</label>
-            <select id="status">
-              <option value="draft">Draf</option>
-              <option value="review">Dalam pemeriksaan</option>
-              <option value="published">Terbit</option>
-              <option value="archived">Arsip</option>
-            </select>
-          </div>
-        </div>
-
-        <label for="summary">Ringkasan berita</label>
-        <textarea id="summary" rows="3"></textarea>
-
-        <label for="body">Isi berita</label>
-        <textarea id="body" required></textarea>
-
-        <label for="source">Tautan sumber berita (opsional)</label>
-        <input id="source" type="url" placeholder="https://...">
-
-        <label for="image">Alamat gambar (opsional)</label>
-        <input id="image" type="url" placeholder="https://...">
-
-        <p>
-          <button class="btn" id="save-btn" type="submit">
-            Simpan Berita
-          </button>
-          <button class="btn gray" id="cancel-btn" type="button">
-            Batal Edit
-          </button>
-        </p>
-      </form>
-
-      <div id="article-message" class="msg" role="status">
-        Siap digunakan.
-      </div>
-    </div>
-
-    <div class="card" id="daftar">
-      <h2>Daftar Berita</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Judul</th>
-              <th>Status</th>
-              <th>Tanggal</th>
-              <th>Tindakan</th>
-            </tr>
-          </thead>
-          <tbody id="article-list">
-            <tr><td colspan="4">Belum memuat data.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Laporan Masyarakat</h2>
-      <p>
-        Pengelolaan laporan masyarakat dan identitas pelapor
-        harus menggunakan pemeriksaan hak akses khusus.
-        Data pribadi pelapor tidak ditampilkan di halaman ini.
-      </p>
-    </div>
-  </section>
+</section>
 </main>
 
 <footer>LAPOR BERITA · Panel Pengelola</footer>
 
 <script>
 (function () {
+  "use strict";
+
   const $ = id => document.getElementById(id);
   const loginPanel = $("login-panel");
   const adminPanel = $("admin-panel");
 
   let db = null;
-  let categories = [];
+  let currentSession = null;
+  let articlesCache = [];
 
-  function message(id, text) {
+  function setMessage(id, text) {
     $(id).textContent = text;
   }
 
@@ -271,23 +292,62 @@ button:disabled { opacity:.6; cursor:wait; }
     })[ch]);
   }
 
-  function slugify(text) {
-    return text.toLowerCase().normalize("NFD")
+  function slugify(value) {
+    return value.toLowerCase().normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
-      .slice(0, 180) || "berita";
+      .slice(0, 170) || "berita";
   }
 
-  function showSession(session) {
-    const signedIn = !!session;
-    loginPanel.classList.toggle("hidden", signedIn);
-    adminPanel.classList.toggle("hidden", !signedIn);
+  function showLoggedOut(text) {
+    currentSession = null;
+    loginPanel.classList.remove("hidden");
+    adminPanel.classList.add("hidden");
+    if (text) setMessage("login-message", text);
+  }
 
-    if (session) {
-      message("session-info",
-        "Login sebagai " + session.user.email +
-        ". Hak pengelolaan tetap diperiksa oleh database.");
+  async function verifyAdmin(session) {
+    if (!session) {
+      showLoggedOut("Silakan masuk menggunakan akun admin.");
+      return false;
+    }
+
+    currentSession = session;
+    setMessage("login-message", "Memeriksa hak akses admin...");
+
+    try {
+      const { data, error } = await db.rpc("is_site_admin");
+
+      if (error) {
+        throw new Error(
+          "Tidak dapat memeriksa hak admin: " + error.message
+        );
+      }
+
+      if (data !== true) {
+        showLoggedOut(
+          "Akun berhasil login, tetapi belum dikenali sebagai admin. " +
+          "Periksa fungsi is_site_admin dan tabel admin_users."
+        );
+        return false;
+      }
+
+      loginPanel.classList.add("hidden");
+      adminPanel.classList.remove("hidden");
+
+      setMessage(
+        "session-info",
+        "Login sebagai " + (session.user.email || "admin") +
+        ". Hak akses admin berhasil diperiksa."
+      );
+
+      return true;
+
+    } catch (error) {
+      console.error(error);
+      showLoggedOut(error.message);
+      return false;
     }
   }
 
@@ -299,7 +359,7 @@ button:disabled { opacity:.6; cursor:wait; }
 
     if (error) throw error;
 
-    categories = data || [];
+    const categories = data || [];
     $("category").innerHTML =
       '<option value="">Tanpa kategori</option>' +
       categories.map(c =>
@@ -315,32 +375,44 @@ button:disabled { opacity:.6; cursor:wait; }
 
     const { data, error } = await db
       .from("articles")
-      .select("id,title,slug,status,created_at,summary,body,category_id,source_url,image_path")
-      .order("created_at", { ascending: false })
+      .select(
+        "id,title,slug,status,created_at,summary,body," +
+        "category_id,source_url,image_path,published_at"
+      )
+      .order("created_at", { ascending:false })
       .limit(100);
 
     if (error) throw error;
 
-    if (!data || !data.length) {
+    articlesCache = data || [];
+
+    if (!articlesCache.length) {
       tbody.innerHTML =
-        "<tr><td colspan='4'>Belum ada berita atau data tidak dapat dibaca.</td></tr>";
+        "<tr><td colspan='4'>Belum ada berita.</td></tr>";
       return;
     }
 
-    tbody.innerHTML = data.map(a =>
+    tbody.innerHTML = articlesCache.map(a =>
       "<tr>" +
       "<td>" + escapeText(a.title) + "</td>" +
-      "<td><span class='pill'>" + escapeText(a.status) + "</span></td>" +
-      "<td>" + escapeText(a.created_at ?
-        new Date(a.created_at).toLocaleDateString("id-ID") : "-") + "</td>" +
+      "<td><span class='pill'>" +
+        escapeText(a.status) + "</span></td>" +
+      "<td>" + escapeText(
+        a.created_at
+          ? new Date(a.created_at).toLocaleDateString("id-ID")
+          : "-"
+      ) + "</td>" +
       '<td><button class="btn edit-btn" type="button" data-id="' +
         escapeText(a.id) + '">Edit</button></td>' +
       "</tr>"
     ).join("");
 
-    tbody.querySelectorAll(".edit-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const article = data.find(item => item.id === btn.dataset.id);
+    tbody.querySelectorAll(".edit-btn").forEach(button => {
+      button.addEventListener("click", function () {
+        const article = articlesCache.find(
+          item => String(item.id) === button.dataset.id
+        );
+
         if (!article) return;
 
         $("article-id").value = article.id;
@@ -354,9 +426,39 @@ button:disabled { opacity:.6; cursor:wait; }
 
         $("form-title").textContent = "Edit Berita";
         $("save-btn").textContent = "Simpan Perubahan";
+
         $("kelola").scrollIntoView({ behavior:"smooth" });
       });
     });
+  }
+
+  async function refreshData() {
+    if (!currentSession) {
+      setMessage("article-message", "Silakan login kembali.");
+      return;
+    }
+
+    const button = $("refresh-btn");
+    button.disabled = true;
+    setMessage("article-message", "Memuat data dari database...");
+
+    try {
+      const allowed = await verifyAdmin(currentSession);
+      if (!allowed) return;
+
+      await loadCategories();
+      await loadArticles();
+
+      setMessage("article-message", "Data berhasil dimuat.");
+    } catch (error) {
+      console.error(error);
+      setMessage(
+        "article-message",
+        "Gagal memuat data: " + error.message
+      );
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function clearForm() {
@@ -367,74 +469,61 @@ button:disabled { opacity:.6; cursor:wait; }
     $("save-btn").textContent = "Simpan Berita";
   }
 
-  async function refresh() {
+  async function initialize() {
     try {
-      await loadCategories();
-      await loadArticles();
-      message("article-message", "Data berhasil dimuat.");
+      const config = window.LAPOR_BERITA_CONFIG;
+
+      if (!config || !config.SUPABASE_URL ||
+          !config.SUPABASE_PUBLISHABLE_KEY) {
+        throw new Error(
+          "Konfigurasi tidak ditemukan. Periksa supabase-config.js."
+        );
+      }
+
+      if (!window.supabase || !window.supabase.createClient) {
+        throw new Error("Pustaka Supabase gagal dimuat.");
+      }
+
+      db = window.supabase.createClient(
+        config.SUPABASE_URL,
+        config.SUPABASE_PUBLISHABLE_KEY
+      );
+
+      setMessage(
+        "login-message",
+        "Koneksi siap. Silakan masuk menggunakan akun admin."
+      );
+
+      const { data, error } = await db.auth.getSession();
+      if (error) throw error;
+
+      if (data.session) {
+        const allowed = await verifyAdmin(data.session);
+        if (allowed) await refreshData();
+      }
+
     } catch (error) {
       console.error(error);
-      message("article-message",
-        "Gagal memuat data: " + error.message +
-        ". Periksa izin akses tabel Supabase.");
-    }
-  }
-
-  try {
-    const config = window.LAPOR_BERITA_CONFIG;
-
-    if (!config || !config.SUPABASE_URL ||
-        !config.SUPABASE_PUBLISHABLE_KEY) {
-      throw new Error(
-        "Konfigurasi tidak ditemukan atau nama variabel tidak sesuai."
+      showLoggedOut(
+        "Konfigurasi belum siap: " + error.message
       );
     }
-
-    if (!window.supabase || !window.supabase.createClient) {
-      throw new Error("Pustaka Supabase tidak berhasil dimuat.");
-    }
-
-    db = window.supabase.createClient(
-      config.SUPABASE_URL,
-      config.SUPABASE_PUBLISHABLE_KEY
-    );
-
-    message("login-message",
-      "Koneksi siap. Silakan masuk dengan akun Supabase.");
-
-    db.auth.getSession().then(async ({ data, error }) => {
-      if (error) throw error;
-      showSession(data.session);
-      if (data.session) await refresh();
-    }).catch(error => {
-      console.error(error);
-      message("login-message",
-        "Gagal memeriksa sesi: " + error.message);
-    });
-
-    db.auth.onAuthStateChange((_event, session) => {
-      showSession(session);
-    });
-
-  } catch (error) {
-    console.error(error);
-    message("login-message",
-      "Konfigurasi belum siap: " + error.message +
-      " Pastikan supabase-config.js berada di folder yang sama dengan admin.html.");
   }
 
-  $("login-form").addEventListener("submit", async event => {
+  $("login-form").addEventListener("submit", async function (event) {
     event.preventDefault();
 
     if (!db) {
-      message("login-message",
-        "Koneksi belum siap. Periksa konfigurasi Supabase.");
+      setMessage(
+        "login-message",
+        "Supabase belum siap. Periksa konfigurasi."
+      );
       return;
     }
 
     const button = $("login-btn");
     button.disabled = true;
-    message("login-message", "Memproses login...");
+    setMessage("login-message", "Memproses login...");
 
     try {
       const { data, error } = await db.auth.signInWithPassword({
@@ -444,87 +533,118 @@ button:disabled { opacity:.6; cursor:wait; }
 
       if (error) throw error;
 
-      showSession(data.session);
-      await refresh();
+      const allowed = await verifyAdmin(data.session);
+
+      if (allowed) {
+        await refreshData();
+      }
 
     } catch (error) {
       console.error(error);
-      message("login-message", "Login gagal: " + error.message);
+      showLoggedOut("Login gagal: " + error.message);
     } finally {
       button.disabled = false;
     }
   });
 
-  $("logout-btn").addEventListener("click", async () => {
+  $("logout-btn").addEventListener("click", async function () {
     if (!db) return;
 
-    const { error } = await db.auth.signOut();
+    const button = $("logout-btn");
+    button.disabled = true;
 
-    if (error) {
-      message("session-info", "Gagal keluar: " + error.message);
-    } else {
-      showSession(null);
-      message("login-message", "Anda sudah keluar.");
+    try {
+      const { error } = await db.auth.signOut();
+      if (error) throw error;
+
+      clearForm();
+      showLoggedOut("Anda telah keluar dari dashboard admin.");
+
+    } catch (error) {
+      setMessage("session-info", "Gagal keluar: " + error.message);
+    } finally {
+      button.disabled = false;
     }
   });
 
-  $("refresh-btn").addEventListener("click", refresh);
+  $("refresh-btn").addEventListener("click", refreshData);
   $("cancel-btn").addEventListener("click", clearForm);
 
-  $("article-form").addEventListener("submit", async event => {
+  $("article-form").addEventListener("submit", async function (event) {
     event.preventDefault();
 
-    if (!db) {
-      message("article-message", "Supabase belum tersambung.");
+    if (!db || !currentSession) {
+      setMessage("article-message", "Silakan login terlebih dahulu.");
       return;
     }
 
-    const title = $("title").value.trim();
-    const currentId = $("article-id").value;
-    const selectedStatus = $("status").value;
-
-    const row = {
-      title,
-      slug: slugify(title),
-      category_id: $("category").value || null,
-      summary: $("summary").value.trim() || null,
-      body: $("body").value.trim(),
-      source_url: $("source").value.trim() || null,
-      image_path: $("image").value.trim() || null,
-      status: selectedStatus,
-      updated_at: new Date().toISOString(),
-      published_at: selectedStatus === "published"
-        ? new Date().toISOString() : null
-    };
-
     const button = $("save-btn");
     button.disabled = true;
-    message("article-message", "Menyimpan berita...");
+    setMessage("article-message", "Memeriksa hak akses...");
 
     try {
+      const allowed = await verifyAdmin(currentSession);
+      if (!allowed) return;
+
+      const title = $("title").value.trim();
+      const articleId = $("article-id").value;
+      const status = $("status").value;
+
+      const row = {
+        title: title,
+        slug: slugify(title),
+        category_id: $("category").value || null,
+        summary: $("summary").value.trim() || null,
+        body: $("body").value.trim(),
+        source_url: $("source").value.trim() || null,
+        image_path: $("image").value.trim() || null,
+        status: status,
+        updated_at: new Date().toISOString(),
+        published_at: status === "published"
+          ? new Date().toISOString()
+          : null
+      };
+
       let result;
 
-      if (currentId) {
-        result = await db.from("articles")
-          .update(row).eq("id", currentId);
+      if (articleId) {
+        result = await db
+          .from("articles")
+          .update(row)
+          .eq("id", articleId)
+          .select("id");
+
       } else {
-        result = await db.from("articles").insert(row);
+        result = await db
+          .from("articles")
+          .insert(row)
+          .select("id");
       }
 
       if (result.error) throw result.error;
 
-      message("article-message", "Berita berhasil disimpan.");
+      if (!result.data || result.data.length === 0) {
+        throw new Error(
+          "Tidak ada baris yang tersimpan. Periksa kebijakan RLS."
+        );
+      }
+
+      setMessage("article-message", "Berita berhasil disimpan.");
       clearForm();
-      await refresh();
+      await refreshData();
 
     } catch (error) {
       console.error(error);
-      message("article-message",
-        "Gagal menyimpan berita: " + error.message);
+      setMessage(
+        "article-message",
+        "Gagal menyimpan berita: " + error.message
+      );
     } finally {
       button.disabled = false;
     }
   });
+
+  initialize();
 })();
 </script>
 </body>
