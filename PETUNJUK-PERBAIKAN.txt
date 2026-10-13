@@ -1,0 +1,7 @@
+PAKET PERBAIKAN LAPOR BERITA
+1. Unggah berkas HTML dan app.js ke root repository laporberita/laporberita pada branch main, menimpa berkas bernama sama.
+2. Jangan mengganti supabase-config.js atau admin.html yang sekarang sudah berfungsi.
+3. Paket memakai style.css yang sudah ada di root repository.
+4. Berita publik diambil dari public.articles dengan status='published' dan published_at tidak NULL.
+5. Jika tidak tampil, cek policy SELECT untuk anon pada public.articles dan public.categories di Supabase.
+6. Formulir laporan masyarakat sengaja belum menyimpan data. Jangan mengumpulkan NIK/foto KTP sebelum RLS, storage privat, dan alur akses admin diuji.
