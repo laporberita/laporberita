@@ -1,1 +1,311 @@
 
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#102a43">
+<title>Dashboard Admin — LAPOR BERITA</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<style>
+:root{--navy:#102a43;--blue:#176b9b;--red:#d92d36;--bg:#f3f6f9;--line:#dce4ea}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 system-ui,Arial,sans-serif;background:var(--bg);color:#172b3a}
+header{background:var(--navy);color:white;padding:18px}
+.wrap{max-width:1100px;margin:auto;padding:18px}
+.brand{font-weight:900;font-size:21px}
+.brand span{color:#ff777c}
+header p{margin:4px 0;color:#d7e3ec}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+nav a,.btn{display:inline-block;padding:10px 14px;border:0;border-radius:7px;background:var(--blue);color:white;text-decoration:none;font-weight:700;cursor:pointer}
+nav a{background:#244b67}
+.btn.red{background:var(--red)}
+.btn.gray{background:#526575}
+.card{background:white;border:1px solid var(--line);border-radius:12px;padding:18px;margin:16px 0}
+h1{font-size:25px;margin:8px 0}
+h2{font-size:20px;margin-top:0}
+label{display:block;font-weight:700;margin:12px 0 5px}
+input,textarea,select{width:100%;padding:11px;border:1px solid #cbd5df;border-radius:7px;font:inherit;background:white}
+textarea{min-height:130px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.msg{padding:12px;border-radius:7px;background:#eef5fa;margin:12px 0;overflow-wrap:anywhere}
+.small{font-size:13px;color:#647789}
+table{border-collapse:collapse;width:100%;min-width:620px}
+th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#f2f6f8}
+.table-wrap{overflow-x:auto}
+.hidden{display:none!important}
+.pill{display:inline-block;background:#e9f1f7;border-radius:20px;padding:3px 9px;font-size:12px}
+footer{text-align:center;color:#657786;padding:25px}
+@media(max-width:650px){.wrap{padding:12px}.row{grid-template-columns:1fr}.card{padding:14px}header{padding:15px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">LAPOR <span>BERITA</span></div>
+    <p>Panel Pengelola Berita</p>
+    <nav>
+      <a href="../index.html">← Website Utama</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#kelola">Kelola Berita</a>
+      <a href="#daftar">Daftar Berita</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card" id="login-panel">
+    <h1>Login Admin</h1>
+    <p class="small">Masuk menggunakan akun yang telah didaftarkan dan diizinkan pada Supabase.</p>
+    <form id="login-form">
+      <label for="email">Email admin</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="password">Kata sandi</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <p><button class="btn" type="submit">Masuk</button></p>
+    </form>
+    <div id="login-message" class="msg" role="status">Menyiapkan koneksi...</div>
+  </section>
+
+  <section id="admin-panel" class="hidden">
+    <div class="card" id="dashboard">
+      <h1>Dashboard Admin</h1>
+      <p>Selamat datang di panel pengelolaan LAPOR BERITA.</p>
+      <div id="session-info" class="msg">Memeriksa akun...</div>
+      <button class="btn gray" id="refresh-btn" type="button">Muat Ulang Data</button>
+      <button class="btn red" id="logout-btn" type="button">Keluar</button>
+    </div>
+
+    <div class="card" id="kelola">
+      <h2 id="form-title">Tambah Berita</h2>
+      <p class="small">Isi berita yang telah diperiksa redaksi. Berita baru disimpan sebagai draf kecuali Anda memilih status lain yang diizinkan.</p>
+      <form id="article-form">
+        <input type="hidden" id="article-id">
+        <label for="title">Judul berita</label>
+        <input id="title" maxlength="250" required>
+        <div class="row">
+          <div>
+            <label for="category">Kategori</label>
+            <select id="category">
+              <option value="">Tanpa kategori</option>
+            </select>
+          </div>
+          <div>
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="draft">Draf</option>
+              <option value="review">Dalam pemeriksaan</option>
+              <option value="published">Terbit</option>
+              <option value="archived">Arsip</option>
+            </select>
+          </div>
+        </div>
+        <label for="summary">Ringkasan berita</label>
+        <textarea id="summary" rows="3"></textarea>
+        <label for="body">Isi berita</label>
+        <textarea id="body" required></textarea>
+        <label for="source">Tautan sumber berita (opsional)</label>
+        <input id="source" type="url" placeholder="https://...">
+        <label for="image">Alamat gambar (opsional)</label>
+        <input id="image" type="url" placeholder="https://...">
+        <p>
+          <button class="btn" type="submit" id="save-btn">Simpan Berita</button>
+          <button class="btn gray" type="button" id="cancel-btn">Batal Edit</button>
+        </p>
+      </form>
+      <div id="article-message" class="msg" role="status">Formulir siap digunakan setelah login.</div>
+    </div>
+
+    <div class="card" id="daftar">
+      <h2>Daftar Berita</h2>
+      <p class="small">Hanya data yang diizinkan oleh kebijakan akses Supabase yang dapat ditampilkan.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Judul</th><th>Status</th><th>Tanggal</th><th>Tindakan</th></tr></thead>
+          <tbody id="article-list"><tr><td colspan="4">Belum memuat data.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Laporan Masyarakat</h2>
+      <p>Data laporan dan identitas pelapor tidak ditampilkan di panel ini dahulu. Akses laporan harus diatur dan diuji secara khusus agar data pribadi tidak terbuka kepada pengguna yang tidak berwenang.</p>
+    </div>
+  </section>
+</main>
+<footer>LAPOR BERITA · Panel Pengelola</footer>
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const loginPanel=$("login-panel");
+  const adminPanel=$("admin-panel");
+  let db=null;
+  let categories=[];
+
+  function message(id,text){$(id).textContent=text}
+  function escapeText(value){
+    return String(value??"").replace(/[&<>"']/g,ch=>({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    })[ch]);
+  }
+  function slugify(text){
+    return text.toLowerCase().normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")
+      .slice(0,180)||"berita";
+  }
+  function showSession(session){
+    const signedIn=!!session;
+    loginPanel.classList.toggle("hidden",signedIn);
+    adminPanel.classList.toggle("hidden",!signedIn);
+    if(session) message("session-info","Login: "+session.user.email+
+      ". Akses pengelolaan tetap mengikuti izin database.");
+  }
+  async function loadCategories(){
+    const {data,error}=await db.from("categories").select("id,name").order("name");
+    if(error) throw error;
+    categories=data||[];
+    $("category").innerHTML='<option value="">Tanpa kategori</option>'+
+      categories.map(c=>'<option value="'+escapeText(c.id)+'">'+escapeText(c.name)+'</option>').join("");
+  }
+  async function loadArticles(){
+    const body=$("article-list");
+    body.innerHTML="<tr><td colspan='4'>Memuat berita...</td></tr>";
+    const {data,error}=await db.from("articles")
+      .select("id,title,slug,status,created_at,summary,body,category_id,source_url,image_path")
+      .order("created_at",{ascending:false}).limit(100);
+    if(error) throw error;
+    if(!data||!data.length){
+      body.innerHTML="<tr><td colspan='4'>Belum ada berita atau akun ini belum memiliki izin baca.</td></tr>";
+      return;
+    }
+    body.innerHTML=data.map(a=>'<tr>'+
+      '<td>'+escapeText(a.title)+'</td>'+
+      '<td><span class="pill">'+escapeText(a.status)+'</span></td>'+
+      '<td>'+escapeText(a.created_at?new Date(a.created_at).toLocaleDateString("id-ID"):"-")+'</td>'+
+      '<td><button class="btn edit-btn" type="button" data-id="'+escapeText(a.id)+'">Edit</button></td>'+
+      '</tr>').join("");
+    body.querySelectorAll(".edit-btn").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const a=data.find(item=>item.id===btn.dataset.id);
+        if(!a)return;
+        $("article-id").value=a.id;
+        $("title").value=a.title||"";
+        $("category").value=a.category_id||"";
+        $("status").value=a.status||"draft";
+        $("summary").value=a.summary||"";
+        $("body").value=a.body||"";
+        $("source").value=a.source_url||"";
+        $("image").value=a.image_path||"";
+        $("form-title").textContent="Edit Berita";
+        $("save-btn").textContent="Simpan Perubahan";
+        $("kelola").scrollIntoView({behavior:"smooth"});
+      });
+    });
+  }
+  function clearForm(){
+    $("article-form").reset();
+    $("article-id").value="";
+    $("status").value="draft";
+    $("form-title").textContent="Tambah Berita";
+    $("save-btn").textContent="Simpan Berita";
+  }
+  async function refresh(){
+    try{
+      await loadCategories();
+      await loadArticles();
+      message("article-message","Data selesai dimuat.");
+    }catch(e){
+      console.error(e);
+      message("article-message","Tidak dapat memuat data. Periksa izin baca tabel categories dan articles pada Supabase.");
+    }
+  }
+
+  try{
+    const config=window.LAPOR_BERITA_CONFIG;
+    if(!config||!config.SUPABASE_URL||!config.SUPABASE_PUBLISHABLE_KEY)
+      throw new Error("Konfigurasi Supabase belum lengkap.");
+    if(!window.supabase||!window.supabase.createClient)
+      throw new Error("Pustaka Supabase belum termuat.");
+    db=window.supabase.createClient(config.SUPABASE_URL,config.SUPABASE_PUBLISHABLE_KEY);
+    message("login-message","Koneksi tersedia. Silakan masuk dengan akun admin Supabase.");
+    db.auth.getSession().then(async({data,error})=>{
+      if(error)throw error;
+      showSession(data.session);
+      if(data.session)await refresh();
+    }).catch(e=>{
+      console.error(e);
+      message("login-message","Gagal memeriksa sesi. Periksa konfigurasi Supabase.");
+    });
+    db.auth.onAuthStateChange((_event,session)=>showSession(session));
+  }catch(e){
+    console.error(e);
+    message("login-message","Konfigurasi belum siap. Periksa file ../supabase-config.js.");
+  }
+
+  $("login-form").addEventListener("submit",async e=>{
+    e.preventDefault();
+    if(!db)return;
+    message("login-message","Memproses login...");
+    const {data,error}=await db.auth.signInWithPassword({
+      email:$("email").value.trim(),password:$("password").value
+    });
+    if(error){
+      message("login-message","Login gagal: "+error.message);
+      return;
+    }
+    showSession(data.session);
+    await refresh();
+  });
+  $("logout-btn").addEventListener("click",async()=>{
+    if(!db)return;
+    const {error}=await db.auth.signOut();
+    if(error)message("session-info","Gagal keluar: "+error.message);
+    else{showSession(null);message("login-message","Anda sudah keluar.");}
+  });
+  $("refresh-btn").addEventListener("click",refresh);
+  $("cancel-btn").addEventListener("click",clearForm);
+
+  $("article-form").addEventListener("submit",async e=>{
+    e.preventDefault();
+    if(!db){message("article-message","Supabase belum tersambung.");return;}
+    const title=$("title").value.trim();
+    const currentId=$("article-id").value;
+    const selectedStatus=$("status").value;
+    const row={
+      title,
+      slug:slugify(title),
+      category_id:$("category").value||null,
+      summary:$("summary").value.trim()||null,
+      body:$("body").value.trim(),
+      source_url:$("source").value.trim()||null,
+      image_path:$("image").value.trim()||null,
+      status:selectedStatus,
+      updated_at:new Date().toISOString()
+    };
+    if(selectedStatus==="published")row.published_at=new Date().toISOString();
+    else row.published_at=null;
+    message("article-message","Menyimpan berita...");
+    let result;
+    if(currentId){
+      result=await db.from("articles").update(row).eq("id",currentId);
+    }else{
+      result=await db.from("articles").insert(row);
+    }
+    if(result.error){
+      console.error(result.error);
+      message("article-message","Gagal menyimpan. Periksa login admin, izin RLS, dan apakah slug sudah digunakan. Detail: "+result.error.message);
+      return;
+    }
+    message("article-message","Permintaan simpan berhasil. Memuat ulang daftar...");
+    clearForm();
+    await refresh();
+  });
+})();
+</script>
+</body>
+</html>
+
