@@ -1,1 +1,135 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#102a43"><title>Laporkan Berita — LAPOR BERITA</title><link rel="stylesheet" href="style.css"></head><body><div id="site-header"></div><main class="container page"><h1>Laporkan Berita</h1><p>Sampaikan informasi kepada redaksi. Setiap laporan harus diperiksa sebelum diterbitkan.</p><div class="privacy-notice"><strong>Pemberitahuan keamanan</strong><p>Formulir pengiriman belum diaktifkan. Jangan masukkan NIK, foto KTP, atau data pribadi sampai penyimpanan privat dan hak akses diuji.</p></div><form id="report-form" class="form-card"><label>Judul informasi<input name="title" required maxlength="250"></label><label>Isi atau kronologi<textarea name="body" required rows="6"></textarea></label><label>Tautan sumber berita (opsional)<input type="url" name="sourceUrl" placeholder="https://..."></label><p id="report-message" class="muted small">Formulir belum mengirim atau menyimpan data.</p><button class="button button-red" type="submit">Kirim ke Redaksi</button></form></main><div id="site-footer"></div><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="supabase-config.js"></script><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <meta name="description" content="Kirim informasi berita kepada redaksi LAPOR BERITA.">
+  <title>Laporkan Berita — LAPOR BERITA</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="topbar">
+        <a class="brand" href="index.html">
+          <span class="brand-mark">LB</span>
+          <span>LAPOR <b>BERITA</b><span class="tagline">Dari Masyarakat, Untuk Masyarakat</span></span>
+        </a>
+        <div class="top-actions">
+          <a class="button" href="index.html">Beranda</a>
+          <a class="button button-red" href="berita.html">Baca Berita</a>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Navigasi utama">
+        <a href="index.html">Beranda</a>
+        <a href="berita.html">Berita</a>
+        <a href="tentang.html">Tentang</a>
+        <a href="kontak.html">Kontak</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container page narrow">
+    <h1>Laporkan Berita</h1>
+    <p>Sampaikan informasi kepada redaksi LAPOR BERITA. Setiap laporan akan diperiksa sebelum diputuskan untuk diterbitkan.</p>
+
+    <div class="privacy-notice">
+      <strong>Perlindungan data pelapor</strong>
+      <p>Untuk tahap ini, formulir hanya menerima judul, isi laporan, dan tautan sumber. <strong>Jangan masukkan NIK, foto KTP, kata sandi, atau data pribadi sensitif</strong> ke dalam laporan. Penyimpanan identitas pribadi belum diaktifkan.</p>
+    </div>
+
+    <form id="report-form" class="form-card">
+      <label for="report-title">Judul informasi
+        <input id="report-title" name="title" required maxlength="250" autocomplete="off">
+      </label>
+      <label for="report-body">Isi atau kronologi
+        <textarea id="report-body" name="body" required rows="7" maxlength="20000" placeholder="Jelaskan informasi, lokasi umum, waktu kejadian, dan hal yang perlu diperiksa redaksi."></textarea>
+      </label>
+      <label for="report-source">Tautan sumber berita (opsional)
+        <input id="report-source" type="url" name="sourceUrl" placeholder="https://contoh.com/berita" inputmode="url">
+      </label>
+      <p id="report-message" class="notice" role="status" aria-live="polite">Menyiapkan koneksi pengiriman laporan...</p>
+      <button id="report-submit" class="button button-red" type="submit">Kirim ke Redaksi</button>
+      <p class="small muted">Dengan mengirimkan laporan, Anda memahami bahwa redaksi dapat memeriksa informasi dan sumbernya sebelum mengambil keputusan publikasi.</p>
+    </form>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div><div class="brand"><span class="brand-mark">LB</span><span>LAPOR BERITA</span></div><p>Dari Masyarakat, Untuk Masyarakat.</p></div>
+      <div class="footer-links"><b>Informasi</b><a href="tentang.html">Tentang Kami</a><a href="pedoman-media.html">Pedoman Pemberitaan</a><a href="kebijakan-privasi.html">Kebijakan Privasi</a></div>
+      <div class="footer-links"><b>Layanan</b><a href="laporkan-berita.html">Laporkan Berita</a><a href="koreksi-hak-jawab.html">Koreksi dan Hak Jawab</a><a href="kontak.html">Kontak Redaksi</a></div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script>
+    (() => {
+      "use strict";
+      const form = document.getElementById("report-form");
+      const message = document.getElementById("report-message");
+      const submit = document.getElementById("report-submit");
+      let db = null;
+
+      try {
+        const cfg = window.LAPOR_BERITA_CONFIG;
+        if (!cfg || !cfg.SUPABASE_URL || !cfg.SUPABASE_PUBLISHABLE_KEY) {
+          throw new Error("Konfigurasi Supabase tidak ditemukan.");
+        }
+        if (!window.supabase || !window.supabase.createClient) {
+          throw new Error("Pustaka Supabase belum termuat. Periksa koneksi internet.");
+        }
+        db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY);
+        message.textContent = "Koneksi siap. Isi laporan, lalu tekan Kirim ke Redaksi.";
+      } catch (err) {
+        console.error(err);
+        message.textContent = "Formulir belum terhubung: " + err.message;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!db) {
+          message.textContent = "Koneksi database belum siap. Muat ulang halaman dan coba lagi.";
+          return;
+        }
+
+        const title = document.getElementById("report-title").value.trim();
+        const body = document.getElementById("report-body").value.trim();
+        const sourceInput = document.getElementById("report-source").value.trim();
+        let source_url = null;
+
+        if (!title || !body) {
+          message.textContent = "Judul dan isi laporan wajib diisi.";
+          return;
+        }
+        if (sourceInput) {
+          try {
+            const parsed = new URL(sourceInput);
+            if (!(["https:", "http:"].includes(parsed.protocol))) throw new Error("scheme");
+            source_url = parsed.href;
+          } catch (_) {
+            message.textContent = "Tautan sumber tidak valid. Gunakan alamat yang diawali https:// atau http://.";
+            return;
+          }
+        }
+
+        submit.disabled = true;
+        message.textContent = "Mengirim laporan ke redaksi...";
+        try {
+          const { error } = await db.from("public_reports").insert({ title, body, source_url });
+          if (error) throw error;
+          form.reset();
+          message.textContent = "Laporan berhasil dikirim ke redaksi. Laporan akan diperiksa sebelum diterbitkan.";
+        } catch (err) {
+          console.error("Gagal mengirim laporan LAPOR BERITA:", err);
+          message.textContent = "Laporan belum berhasil dikirim. Pesan sistem: " + (err.message || "Periksa koneksi dan izin tabel public_reports.");
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
