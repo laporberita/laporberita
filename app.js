@@ -1,4 +1,3 @@
-
 (()=>{'use strict';
 
 const $ = id => document.getElementById(id);
@@ -12,13 +11,19 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   "'": '&#39;'
 }[c]));
 
-const date = s => s
-  ? new Date(s).toLocaleDateString('id-ID', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    })
-  : 'Berita pendidikan';
+const date = s => {
+  if (!s) return 'Berita pendidikan';
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return 'Berita pendidikan';
+  return d.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+};
+
+const fallbackImage =
+  'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=700&q=75';
 
 let db = null;
 
@@ -37,6 +42,35 @@ if ($('year')) {
   $('year').textContent = new Date().getFullYear();
 }
 
+function showMessage(element, message) {
+  if (element) {
+    element.innerHTML = '<p class="muted">' + esc(message) + '</p>';
+  }
+}
+
+function makeCard(a) {
+  const image = a.image_path || fallbackImage;
+
+  return `
+    <article class="article-card">
+      <a href="artikel.html?id=${encodeURIComponent(a.id)}">
+        <img
+          loading="lazy"
+          src="${esc(image)}"
+          alt="Foto berita"
+          onerror="this.onerror=null;this.src='${fallbackImage}'"
+        >
+        <div class="pad">
+          <span class="tag">Berita Pendidikan</span>
+          <h3>${esc(a.title || 'Tanpa judul')}</h3>
+          <p>${esc(a.summary || '')}</p>
+          <small>${esc(date(a.published_at || a.created_at))}</small>
+        </div>
+      </a>
+    </article>
+  `;
+}
+
 async function load() {
   const latest = $('latest-list');
   const grid = $('article-grid');
@@ -44,14 +78,13 @@ async function load() {
   const status = $('database-status');
 
   if (!db) {
-    if (status) {
-      status.textContent =
-        'Database belum terhubung. Periksa supabase-config.js.';
-    }
-    if (all) {
-      all.innerHTML =
-        '<p class="muted">Konfigurasi database belum tersedia.</p>';
-    }
+    const message =
+      'Database belum terhubung. Periksa konfigurasi Supabase.';
+
+    if (status) status.textContent = message;
+    showMessage(latest, message);
+    showMessage(grid, message);
+    showMessage(all, message);
     return;
   }
 
@@ -63,7 +96,7 @@ async function load() {
     const { data, error } = await db
       .from('articles')
       .select(
-        'id,title,slug,summary,body,image_path,source_url,created_at,published_at,status,region_type,province,regency,city'
+        'id,title,summary,image_path,created_at,published_at,status'
       )
       .eq('status', 'published')
       .order('created_at', { ascending: false })
@@ -73,33 +106,6 @@ async function load() {
 
     const items = data || [];
 
-    function makeCard(a) {
-      const location =
-        a.city || a.regency || a.province || a.region_type || 'Pendidikan';
-
-      const image =
-        a.image_path ||
-        'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=700&q=75';
-
-      return `
-        <article class="article-card">
-          <a href="artikel.html?id=${encodeURIComponent(a.id)}">
-            <img
-              loading="lazy"
-              src="${esc(image)}"
-              alt="Foto berita"
-            >
-            <div class="pad">
-              <span class="tag">${esc(location)}</span>
-              <h3>${esc(a.title)}</h3>
-              <p>${esc(a.summary || '')}</p>
-              <small>${esc(date(a.published_at || a.created_at))}</small>
-            </div>
-          </a>
-        </article>
-      `;
-    }
-
     if (latest) {
       latest.innerHTML = items.slice(0, 4).map(a => `
         <a
@@ -108,11 +114,12 @@ async function load() {
         >
           <img
             class="thumb"
-            src="${esc(a.image_path || 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=300&q=70')}"
+            src="${esc(a.image_path || fallbackImage)}"
             alt="Foto berita"
+            onerror="this.onerror=null;this.src='${fallbackImage}'"
           >
           <span>
-            <b>${esc(a.title)}</b>
+            <b>${esc(a.title || 'Tanpa judul')}</b>
             <small>${esc(date(a.published_at || a.created_at))}</small>
           </span>
         </a>
@@ -138,26 +145,14 @@ async function load() {
   } catch (e) {
     console.error('Gagal memuat berita:', e);
 
-    if (status) {
-      status.textContent =
-        'Gagal memuat berita dari database: ' +
-        (e.message || 'Periksa koneksi dan izin Supabase.');
-    }
+    const message =
+      'Gagal memuat berita dari database: ' +
+      (e.message || 'Periksa koneksi Supabase.');
 
-    if (all) {
-      all.innerHTML =
-        '<p class="muted">Berita belum dapat dimuat. Silakan coba lagi.</p>';
-    }
-
-    if (latest) {
-      latest.innerHTML =
-        '<p class="muted">Berita gagal dimuat dari database.</p>';
-    }
-
-    if (grid) {
-      grid.innerHTML =
-        '<p class="muted">Berita gagal dimuat dari database.</p>';
-    }
+    if (status) status.textContent = message;
+    showMessage(latest, message);
+    showMessage(grid, message);
+    showMessage(all, message);
   }
 }
 
