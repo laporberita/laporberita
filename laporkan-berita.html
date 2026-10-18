@@ -1,1 +1,189 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kirim Berita Pendidikan — LAPOR BERITA</title><link rel="stylesheet" href="style.css"></head><body><header class="masthead"><div class="container mastrow"><a class="brand" href="index.html"><span class="brand-icon">▱<small>◆</small></span><span><b>LAPOR BERITA</b><small>Media Berita Pendidikan Indonesia</small></span></a><a class="button" href="index.html">Beranda</a></div></header><main class="container"><section class="page"><h1>Kirim Informasi Pendidikan</h1><p class="notice">Formulir kiriman publik akan diaktifkan setelah tabel laporan, penyimpanan berkas, dan aturan privasi diperiksa. Untuk sementara, kirim berita melalui kontak redaksi.</p><p>Mohon jangan mengirim NIK atau foto KTP melalui formulir publik yang belum diamankan.</p><p><a class="button" href="kontak.html">Kontak Redaksi</a></p></section></main><footer class="footer"><div class="container">LAPOR BERITA</div></footer></body></html>
+
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07539b">
+<title>Kirim Berita — LAPOR BERITA</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<style>
+.report-form{max-width:760px;margin:24px auto}
+.report-form .field{margin-bottom:17px}
+.report-form label{display:block;font-weight:600;margin-bottom:7px}
+.report-form input,.report-form textarea,.report-form select{width:100%;box-sizing:border-box;padding:12px;border:1px solid #ccd6e0;border-radius:8px;font:inherit}
+.report-form textarea{min-height:130px}
+.report-note{background:#eef6ff;padding:14px;border-radius:8px;margin:16px 0}
+.report-status{margin-top:15px;padding:12px;border-radius:8px;overflow-wrap:anywhere}
+.report-status:empty{display:none}
+.required{color:#b42318}
+</style>
+</head>
+<body>
+<header class="nav">
+ <div class="container mastrow">
+  <a class="brand" href="index.html" style="color:white">
+   <span class="brand-icon" style="color:white;border-color:white">▱<small>◆</small></span>
+   <span><b style="color:white">LAPOR BERITA</b>
+   <small style="color:#dceaf7">Media Berita Pendidikan Indonesia</small></span>
+  </a>
+  <a class="button" href="index.html">Beranda</a>
+ </div>
+</header>
+
+<main class="container">
+ <section class="page report-form">
+  <h1>Kirim Berita</h1>
+  <p class="muted">Sampaikan informasi pendidikan, kegiatan sekolah, prestasi, atau peristiwa di daerah Anda.</p>
+
+  <div class="report-note">
+   <strong>Perhatian</strong>
+   <p>Setiap laporan akan diperiksa admin sebelum diterbitkan. Jangan mengirim informasi palsu atau materi yang melanggar privasi orang lain.</p>
+   <p>Nama, NIK, dan foto KTP—jika diperlukan untuk verifikasi—harus disimpan secara privat dan tidak ditampilkan pada berita publik.</p>
+  </div>
+
+  <form id="report-form">
+   <div class="field">
+    <label for="reporter-name">Nama pelapor <span class="required">*</span></label>
+    <input id="reporter-name" autocomplete="name" maxlength="150" required>
+   </div>
+
+   <div class="field">
+    <label for="reporter-email">Email atau nomor kontak (opsional)</label>
+    <input id="reporter-email" maxlength="200" autocomplete="email" placeholder="Kontak untuk dihubungi admin">
+   </div>
+
+   <div class="field">
+    <label for="title">Judul berita <span class="required">*</span></label>
+    <input id="title" maxlength="250" required placeholder="Tuliskan judul berita">
+   </div>
+
+   <div class="field">
+    <label for="category">Kategori berita</label>
+    <select id="category">
+     <option value="Pendidikan">Pendidikan</option>
+     <option value="Sekolah">Sekolah</option>
+     <option value="Guru">Guru</option>
+     <option value="Siswa">Siswa dan prestasi</option>
+     <option value="Kegiatan">Kegiatan</option>
+     <option value="Kebijakan">Kebijakan pendidikan</option>
+     <option value="Lainnya">Lainnya</option>
+    </select>
+   </div>
+
+   <div class="field">
+    <label for="region">Lokasi berita</label>
+    <input id="region" maxlength="250" placeholder="Contoh: Tanjungbalai, Sumatera Utara">
+   </div>
+
+   <div class="field">
+    <label for="body">Isi berita <span class="required">*</span></label>
+    <textarea id="body" maxlength="30000" required placeholder="Jelaskan apa yang terjadi, waktu, tempat, dan informasi pendukung."></textarea>
+   </div>
+
+   <div class="field">
+    <label for="source">Tautan sumber berita (opsional)</label>
+    <input id="source" type="url" maxlength="2000" placeholder="https://...">
+   </div>
+
+   <div class="field">
+    <label for="evidence">Foto atau video pendukung (opsional)</label>
+    <input id="evidence" type="file" accept="image/*,video/mp4,video/webm">
+    <small class="muted">Berkas akan dikirim hanya setelah penyimpanan aman di server diaktifkan.</small>
+   </div>
+
+   <div class="field">
+    <label>
+     <input id="consent" type="checkbox" required style="width:auto">
+     Saya menyatakan informasi yang dikirim benar dan mengizinkan admin memeriksanya.
+    </label>
+   </div>
+
+   <button id="submit-button" class="button" type="submit">Kirim untuk Diperiksa</button>
+   <div id="report-status" class="report-status" role="status" aria-live="polite"></div>
+  </form>
+ </section>
+</main>
+
+<footer class="footer">
+ <div class="container">LAPOR BERITA · Informasi untuk masyarakat</div>
+</footer>
+
+<script>
+(function(){
+ 'use strict';
+
+ const form=document.getElementById('report-form');
+ const status=document.getElementById('report-status');
+ const button=document.getElementById('submit-button');
+
+ form.addEventListener('submit',async function(event){
+  event.preventDefault();
+
+  if(!document.getElementById('consent').checked){
+   status.textContent='Silakan setujui pernyataan sebelum mengirim.';
+   return;
+  }
+
+  const cfg=window.LAPOR_BERITA_CONFIG;
+  if(!cfg||!window.supabase){
+   status.textContent='Konfigurasi layanan belum tersedia.';
+   return;
+  }
+
+  const file=document.getElementById('evidence').files[0];
+
+  if(file && file.size>20*1024*1024){
+   status.textContent='Ukuran berkas maksimal 20 MB.';
+   return;
+  }
+
+  const payload={
+   reporter_name:document.getElementById('reporter-name').value.trim(),
+   reporter_contact:document.getElementById('reporter-email').value.trim(),
+   title:document.getElementById('title').value.trim(),
+   category:document.getElementById('category').value,
+   location:document.getElementById('region').value.trim(),
+   body:document.getElementById('body').value.trim(),
+   source_url:document.getElementById('source').value.trim(),
+   consent:true
+  };
+
+  if(!payload.reporter_name||!payload.title||!payload.body){
+   status.textContent='Lengkapi nama, judul, dan isi berita.';
+   return;
+  }
+
+  button.disabled=true;
+  status.textContent='Mengirim laporan...';
+
+  try{
+   const db=window.supabase.createClient(
+    cfg.SUPABASE_URL,
+    cfg.SUPABASE_PUBLISHABLE_KEY
+   );
+
+   const {data,error}=await db.functions.invoke(
+    'kirim-laporan-berita',
+    {body:payload}
+   );
+
+   if(error)throw error;
+   if(!data||data.success!==true){
+    throw new Error(data&&data.message?data.message:'Laporan belum dapat diproses.');
+   }
+
+   form.reset();
+   status.textContent='Laporan berhasil dikirim. Simpan nomor laporan: '+(data.report_id||'menunggu konfirmasi admin')+'.';
+  }catch(error){
+   status.textContent='Pengiriman belum aktif. Fungsi server Supabase kirim-laporan-berita perlu disiapkan terlebih dahulu.';
+  }finally{
+   button.disabled=false;
+  }
+ });
+})();
+</script>
+</body>
+</html>
