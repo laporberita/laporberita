@@ -1,6 +1,10 @@
-(()=>{'use strict';
-const $=id=>document.getElementById(id),cfg=window.LAPOR_BERITA_CONFIG;
+(()=>{
+'use strict';
+
+const $=id=>document.getElementById(id);
+const cfg=window.LAPOR_BERITA_CONFIG;
 let db=null,session=null,cache=[];
+
 const say=(id,s)=>$(id).textContent=s;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const slug=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,170)||'berita';
@@ -108,8 +112,48 @@ async function load(){
  const {data,error}=await db.from('articles').select('*').order('created_at',{ascending:false}).limit(100);
  if(error)throw error;
  cache=data||[];
- $('article-list').innerHTML=cache.map(a=>`<tr><td>${esc(a.title)}</td><td>${esc(locationOf(a))}</td><td>${esc(a.status)}</td><td>${a.created_at?new Date(a.created_at).toLocaleDateString('id-ID'):'—'}</td><td><button class="button" data-edit="${esc(a.id)}">Edit</button></td></tr>`).join('')||'<tr><td colspan="5">Belum ada berita.</td></tr>';
- document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>edit(cache.find(a=>a.id===b.dataset.edit)));
+
+ $('article-list').innerHTML=cache.map(a=>`
+  <tr>
+   <td>${esc(a.title)}</td>
+   <td>${esc(locationOf(a))}</td>
+   <td>${esc(a.status)}</td>
+   <td>${a.created_at?new Date(a.created_at).toLocaleDateString('id-ID'):'—'}</td>
+   <td>
+    <button class="button" data-edit="${esc(a.id)}">Edit</button>
+    <button class="button" data-delete="${esc(a.id)}" style="background:#b42318;color:white;margin-left:4px">Hapus</button>
+   </td>
+  </tr>`).join('')||'<tr><td colspan="5">Belum ada berita.</td></tr>';
+
+ document.querySelectorAll('[data-edit]').forEach(b=>{
+  b.onclick=()=>edit(cache.find(a=>a.id===b.dataset.edit));
+ });
+
+ document.querySelectorAll('[data-delete]').forEach(b=>{
+  b.onclick=()=>deleteArticle(b.dataset.delete);
+ });
+}
+
+async function deleteArticle(id){
+ const article=cache.find(a=>a.id===id);
+ if(!article)return;
+
+ const title=article.title||'Berita tanpa judul';
+ if(!confirm('Hapus berita ini secara permanen?\n\n'+title+'\n\nTindakan ini tidak dapat dibatalkan.'))return;
+
+ try{
+  await verify();
+
+  const {error}=await db.from('articles').delete().eq('id',id);
+  if(error)throw error;
+
+  if($('article-id').value===id)reset();
+
+  say('article-message','Berita berhasil dihapus.');
+  await load();
+ }catch(e){
+  say('article-message','Gagal menghapus berita: '+e.message);
+ }
 }
 
 async function chooseByName(selectId,name){
@@ -132,6 +176,7 @@ async function edit(a){
  $('region-type').value=a.region_type||'';
  $('location-manual').value=a.location_manual||'';
  $('location-detail').value=a.location_detail||'';
+
  await chooseByName('province-select',a.province);
  if($('province-select').value){
   await fillSelect('province-select','regency-select',c=>API+'regencies/'+c+'.json','Pilih kabupaten/kota',1);
@@ -163,7 +208,7 @@ function reset(){
 }
 
 async function verify(){
- if(!session)return false;
+ if(!session)throw Error('Silakan login kembali.');
  await isAdmin();
  return true;
 }
@@ -251,6 +296,7 @@ $('article-form').onsubmit=async e=>{
   const title=$('title').value.trim(),status=$('status').value;
   const province=selectedName('province-select'),regency=selectedName('regency-select');
   const district=selectedName('district-select'),village=selectedName('village-select');
+
   const row={
    title,slug:slug(title),
    summary:$('summary').value.trim()||null,
@@ -268,9 +314,14 @@ $('article-form').onsubmit=async e=>{
    location_manual:$('location-manual').value.trim()||null,
    location_detail:$('location-detail').value.trim()||null
   };
-  let q=$('article-id').value?db.from('articles').update(row).eq('id',$('article-id').value):db.from('articles').insert(row);
+
+  let q=$('article-id').value
+   ?db.from('articles').update(row).eq('id',$('article-id').value)
+   :db.from('articles').insert(row);
+
   const {error}=await q;
   if(error)throw error;
+
   say('article-message','Berita tersimpan. Unggahan media belum aktif sampai Storage disiapkan.');
   reset();
   await load();
