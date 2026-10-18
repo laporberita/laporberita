@@ -6,7 +6,6 @@ const cfg=window.LAPOR_BERITA_CONFIG;
 let db=null,session=null,cache=[],reportCache=[];
 
 const say=(id,s)=>$(id).textContent=s;
-
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({
  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[c]));
@@ -19,14 +18,10 @@ const slug=s=>String(s||'').toLowerCase().normalize('NFD')
 function setOptions(el,items,placeholder){
  el.innerHTML='';
  const first=document.createElement('option');
- first.value='';
- first.textContent=placeholder;
- el.appendChild(first);
+ first.value='';first.textContent=placeholder;el.appendChild(first);
  (items||[]).forEach(x=>{
   const o=document.createElement('option');
-  o.value=x.code;
-  o.textContent=x.name;
-  el.appendChild(o);
+  o.value=x.code;o.textContent=x.name;el.appendChild(o);
  });
 }
 
@@ -103,10 +98,8 @@ function selectedName(id){
 
 function refreshLocation(){
  const parts=[
-  selectedName('village-select'),
-  selectedName('district-select'),
-  selectedName('regency-select'),
-  selectedName('province-select'),
+  selectedName('village-select'),selectedName('district-select'),
+  selectedName('regency-select'),selectedName('province-select'),
   $('location-manual').value.trim()
  ].filter(Boolean);
 
@@ -153,13 +146,19 @@ async function isAdmin(){
  return true;
 }
 
+async function verify(){
+ if(!session)throw Error('Silakan login kembali.');
+ await isAdmin();
+ return true;
+}
+
 function locationOf(a){
  return [
   a.village,a.district,a.regency,a.city,a.province,a.location_manual
  ].filter(Boolean).join(' • ')||a.region_type||'—';
 }
 
-/* DAFTAR BERITA YANG SUDAH ADA */
+/* DAFTAR BERITA */
 async function load(){
  const {data,error}=await db.from('articles')
   .select('*').order('created_at',{ascending:false}).limit(100);
@@ -173,14 +172,42 @@ async function load(){
   <td>${esc(locationOf(a))}</td>
   <td>${esc(a.status)}</td>
   <td>${a.created_at?new Date(a.created_at).toLocaleDateString('id-ID'):'—'}</td>
-  <td><button class="button" data-edit="${esc(a.id)}">Edit</button></td>
+  <td>
+   <div class="report-actions">
+    <button type="button" class="button" data-edit="${esc(a.id)}">Edit</button>
+    <button type="button" class="button danger" data-delete-article="${esc(a.id)}">Hapus</button>
+   </div>
+  </td>
  </tr>`).join('')||'<tr><td colspan="5">Belum ada berita.</td></tr>';
 
  document.querySelectorAll('[data-edit]').forEach(b=>{
   b.onclick=()=>edit(cache.find(a=>a.id===b.dataset.edit));
  });
+ document.querySelectorAll('[data-delete-article]').forEach(b=>{
+  b.onclick=()=>deleteArticle(b.dataset.deleteArticle);
+ });
 
  await loadReports();
+}
+
+/* HAPUS BERITA */
+async function deleteArticle(id){
+ const a=cache.find(x=>x.id===id);
+ if(!a)return;
+
+ if(!window.confirm('Hapus berita ini secara permanen?\n\n'+a.title+
+  '\n\nTindakan ini tidak dapat dibatalkan.'))return;
+
+ try{
+  await verify();
+  const {error}=await db.from('articles').delete().eq('id',id);
+  if(error)throw error;
+
+  say('article-message','Berita berhasil dihapus.');
+  await load();
+ }catch(e){
+  say('article-message','Gagal menghapus berita: '+e.message);
+ }
 }
 
 /* DAFTAR LAPORAN MASYARAKAT */
@@ -196,7 +223,7 @@ async function loadReports(){
 
   if(!reportCache.length){
    $('report-list').innerHTML='<tr><td colspan="4">Belum ada laporan masyarakat.</td></tr>';
-   $('report-message').textContent='Belum ada laporan yang tercatat.';
+   say('report-message','Belum ada laporan yang tercatat.');
    $('report-detail-panel').classList.add('hidden');
    return;
   }
@@ -204,23 +231,29 @@ async function loadReports(){
   $('report-list').innerHTML=reportCache.map(r=>{
    const done=Boolean(r.published_article_id);
    const status=done?'Sudah diterbitkan':(r.status||'Dikirim');
+
    return `<tr>
     <td>${esc(r.title||'(Tanpa judul)')}</td>
     <td>${esc(status)}</td>
     <td>${r.created_at?new Date(r.created_at).toLocaleDateString('id-ID'):'—'}</td>
-    <td><div class="report-actions">
-     <button type="button" class="button secondary" data-inspect-report="${esc(r.id)}">Periksa</button>
-     ${done?'':`<button type="button" class="button" data-publish-report="${esc(r.id)}">Terbitkan</button>`}
-    </div></td>
+    <td>
+     <div class="report-actions">
+      <button type="button" class="button secondary" data-inspect-report="${esc(r.id)}">Periksa</button>
+      ${done?'':`<button type="button" class="button" data-publish-report="${esc(r.id)}">Terbitkan</button>`}
+      <button type="button" class="button danger" data-delete-report="${esc(r.id)}">Hapus</button>
+     </div>
+    </td>
    </tr>`;
   }).join('');
 
   document.querySelectorAll('[data-inspect-report]').forEach(b=>{
    b.onclick=()=>inspectReport(b.dataset.inspectReport);
   });
-
   document.querySelectorAll('[data-publish-report]').forEach(b=>{
    b.onclick=()=>publishReport(b.dataset.publishReport);
+  });
+  document.querySelectorAll('[data-delete-report]').forEach(b=>{
+   b.onclick=()=>deleteReport(b.dataset.deleteReport);
   });
 
   say('report-message','Laporan berhasil dimuat: '+reportCache.length+' laporan.');
@@ -228,6 +261,28 @@ async function loadReports(){
  }catch(e){
   $('report-list').innerHTML='<tr><td colspan="4">Laporan tidak dapat dimuat.</td></tr>';
   say('report-message','Gagal memuat laporan. Periksa izin admin pada tabel public_reports. '+e.message);
+ }
+}
+
+/* HAPUS LAPORAN */
+async function deleteReport(id){
+ const r=reportCache.find(x=>x.id===id);
+ if(!r)return;
+
+ if(!window.confirm('Hapus laporan masyarakat ini secara permanen?\n\n'+
+  (r.title||'(Tanpa judul)')+
+  '\n\nTindakan ini tidak dapat dibatalkan.'))return;
+
+ try{
+  await verify();
+  const {error}=await db.from('public_reports').delete().eq('id',id);
+  if(error)throw error;
+
+  $('report-detail-panel').classList.add('hidden');
+  say('report-message','Laporan berhasil dihapus.');
+  await loadReports();
+ }catch(e){
+  say('report-message','Gagal menghapus laporan: '+e.message);
  }
 }
 
@@ -248,7 +303,7 @@ function inspectReport(id){
   `<p><b>Tanggal masuk:</b> ${r.created_at?esc(new Date(r.created_at).toLocaleString('id-ID')):'—'}</p>`+
   (r.published_article_id
    ?'<p><b>Catatan:</b> Laporan ini sudah ditautkan ke berita yang diterbitkan.</p>'
-   :'<p><b>Langkah berikutnya:</b> Periksa isi laporan, lalu tekan Terbitkan jika sudah disetujui.</p>');
+   :'<p><b>Langkah berikutnya:</b> Periksa isi laporan, lalu tekan Terbitkan jika disetujui.</p>');
 
  $('report-detail-panel').classList.remove('hidden');
  $('report-detail-panel').scrollIntoView({behavior:'smooth',block:'start'});
@@ -258,7 +313,7 @@ $('close-report-btn').onclick=()=>{
  $('report-detail-panel').classList.add('hidden');
 };
 
-/* TERBITKAN LAPORAN SETELAH PERSETUJUAN ADMIN */
+/* TERBITKAN LAPORAN */
 async function publishReport(id){
  const r=reportCache.find(x=>x.id===id);
  if(!r)return;
@@ -272,23 +327,19 @@ async function publishReport(id){
  const body=String(r.body||'').trim();
 
  if(!title||!body){
-  say('report-message','Judul atau isi laporan kosong. Laporan tidak dapat diterbitkan.');
+  say('report-message','Judul atau isi laporan kosong.');
   return;
  }
 
- const approved=window.confirm(
-  'Apakah Sahabat sudah memeriksa laporan ini dan menyetujui penerbitannya?\n\n'+title+
-  '\n\nBerita akan langsung tampil sebagai berita terbit.'
- );
-
- if(!approved)return;
+ if(!window.confirm('Apakah laporan sudah diperiksa dan disetujui?\n\n'+
+  title+'\n\nBerita akan langsung diterbitkan.'))return;
 
  say('report-message','Menerbitkan laporan...');
 
  try{
   await verify();
-
   const now=new Date().toISOString();
+
   const article={
    title,
    slug:slug(title)+'-'+String(r.id).slice(0,8),
@@ -320,7 +371,7 @@ async function publishReport(id){
 
   if(updateError){
    say('report-message',
-    'Berita berhasil diterbitkan, tetapi penanda laporan belum berhasil diperbarui. Jangan tekan Terbitkan lagi pada laporan ini. Kesalahan: '+updateError.message);
+    'Berita sudah diterbitkan, tetapi penanda laporan gagal diperbarui. Jangan terbitkan lagi. '+updateError.message);
    await load();
    return;
   }
@@ -397,21 +448,12 @@ function reset(){
  refreshLocation();
 }
 
-async function verify(){
- if(!session)throw Error('Silakan login kembali.');
- await isAdmin();
- return true;
-}
-
+/* LOGIN DAN PEMUATAN */
 async function init(){
  try{
   if(!cfg||!window.supabase)throw Error('Konfigurasi Supabase/pustaka belum tersedia.');
 
-  db=window.supabase.createClient(
-   cfg.SUPABASE_URL,
-   cfg.SUPABASE_PUBLISHABLE_KEY
-  );
-
+  db=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
   await loadProvinces();
 
   const {data,error}=await db.auth.getSession();
@@ -439,15 +481,13 @@ $('login-form').onsubmit=async e=>{
    email:$('email').value.trim(),
    password:$('password').value
   });
-
   if(error)throw error;
-  session=data.session;
 
+  session=data.session;
   await isAdmin();
   authShow(true);
   $('session-info').textContent='Login: '+session.user.email;
   await load();
-
  }catch(e){
   say('login-message','Login gagal atau data gagal dimuat: '+e.message);
  }
@@ -475,7 +515,6 @@ $('body').addEventListener('input',autoregion);
 
 $('fetch-btn').onclick=async()=>{
  const url=$('source').value.trim();
-
  if(!/^https?:\/\//i.test(url)){
   say('article-message','Tempel tautan lengkap yang diawali https://');
   return;
@@ -493,23 +532,19 @@ $('fetch-btn').onclick=async()=>{
 
   autoregion();
   say('article-message','Data berhasil ditarik. Periksa dan sunting sebelum disimpan.');
-
  }catch(e){
-  say('article-message','Tarik data belum aktif atau sumber membatasi akses. Isi manual bila perlu. '+e.message);
+  say('article-message','Tarik data belum aktif atau sumber membatasi akses. '+e.message);
  }
 };
 
 $('media-files').onchange=()=>{
  const files=[...$('media-files').files];
-
  if(files.length+($('image-file').files.length?1:0)>10){
   $('media-files').value='';
   say('article-message','Maksimal 10 foto/video per berita.');
   return;
  }
-
- $('media-preview').textContent=files.length+
-  ' berkas dipilih. Berkas belum diunggah ke server.';
+ $('media-preview').textContent=files.length+' berkas dipilih. Berkas belum diunggah ke server.';
 };
 
 $('article-form').onsubmit=async e=>{
@@ -520,7 +555,6 @@ $('article-form').onsubmit=async e=>{
 
   const title=$('title').value.trim();
   const status=$('status').value;
-
   const province=selectedName('province-select');
   const regency=selectedName('regency-select');
   const district=selectedName('district-select');
