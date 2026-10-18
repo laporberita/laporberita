@@ -1,4 +1,3 @@
-
 (()=>{'use strict';
 const $=id=>document.getElementById(id),cfg=window.LAPOR_BERITA_CONFIG;
 let db=null,session=null,cache=[];
