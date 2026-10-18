@@ -1,7 +1,9 @@
+
 <!doctype html>
 <html lang="id">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel Admin — LAPOR BERITA</title>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -11,44 +13,216 @@
 .location-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .location-grid .field{margin:0}
 .location-help{font-size:.9rem;color:#526579}
-@media(max-width:600px){.location-grid{grid-template-columns:1fr}}
+.report-detail{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f6fa;padding:14px;border-radius:8px;margin-top:12px}
+.report-actions{display:flex;flex-wrap:wrap;gap:6px}
+@media(max-width:600px){
+ .location-grid{grid-template-columns:1fr}
+ .tablewrap table{min-width:650px}
+}
 </style>
 </head>
 <body>
-<header class="nav"><div class="container mastrow">
-<a class="brand" href="index.html" style="color:white"><span class="brand-icon" style="color:white;border-color:white">▱<small>◆</small></span><span><b style="color:white">LAPOR BERITA</b><small style="color:#dceaf7">Panel Admin Pendidikan</small></span></a>
+<header class="nav">
+<div class="container mastrow">
+<a class="brand" href="index.html" style="color:white">
+<span class="brand-icon" style="color:white;border-color:white">▱<small>◆</small></span>
+<span><b style="color:white">LAPOR BERITA</b><small style="color:#dceaf7">Panel Admin Pendidikan</small></span>
+</a>
 <a class="button" href="index.html">Lihat Website ↗</a>
-</div></header>
-<main class="container">
-<section class="page" id="login-panel"><h1>Login Admin</h1><p class="muted">Masuk menggunakan akun admin Supabase yang sudah diberi hak akses.</p>
-<form id="login-form"><div class="field"><label>Email</label><input id="email" type="email" autocomplete="username" required></div><div class="field"><label>Kata sandi</label><input id="password" type="password" autocomplete="current-password" required></div><button class="button">Masuk</button></form>
-<div id="login-message" class="status">Memeriksa konfigurasi…</div></section>
-<section id="admin-panel" class="hidden">
-<div class="page"><h1>Dashboard Admin</h1><p id="session-info" class="notice"></p><div class="toolbar"><button id="refresh-btn" class="button secondary">Muat ulang</button><button id="logout-btn" class="button danger">Keluar</button></div></div>
-<div class="page"><h2 id="form-title">Buat Berita</h2><p class="muted">Tulis berita sendiri atau tempel tautan sumber untuk repost. Periksa dan sunting isi sebelum diterbitkan.</p>
-<form id="article-form"><input type="hidden" id="article-id">
-<div class="field"><label>Tautan sumber untuk repost (opsional)</label><input id="source" type="url" placeholder="https://situsberita.id/artikel..."></div>
-<div class="toolbar"><button type="button" id="fetch-btn" class="button">Tarik Data Berita</button><span class="muted">Jika tautan gagal diambil, isi berita secara manual.</span></div>
-<div class="field"><label>Judul berita</label><input id="title" maxlength="250" required></div>
-<div class="field"><label>Ringkasan</label><textarea id="summary" rows="3"></textarea></div>
-<div class="field"><label>Isi berita</label><textarea id="body" required rows="8"></textarea></div>
-<div class="field"><label>Foto utama — URL atau unggah</label><input id="image" type="url" placeholder="https://..."><input id="image-file" type="file" accept="image/*" style="margin-top:8px"><small class="muted">Unggahan foto belum disimpan ke Storage; gunakan URL foto sampai Storage disiapkan.</small></div>
-<div class="field"><label>Foto/video tambahan (maksimal 10 berkas)</label><input id="media-files" type="file" accept="image/*,video/*" multiple><small class="muted">Pratinjau pilihan saja. Penyimpanan berkas memerlukan pengaturan Supabase Storage.</small><div id="media-preview"></div></div>
-<hr>
-<h3>Lokasi Berita</h3><p class="location-help">Pilih lokasi bertingkat. Jika lokasi tidak tersedia, isi bagian lokasi manual di bawah. Sistem mencoba mengenali wilayah dari judul dan isi, tetapi tetap periksa kembali.</p>
-<div class="location-grid">
-<div class="field"><label>Jenis wilayah</label><select id="region-type"><option value="">Pilih jenis wilayah</option><option value="desa">Desa/Kelurahan</option><option value="kecamatan">Kecamatan</option><option value="kabupaten">Kabupaten</option><option value="kota">Kota</option><option value="provinsi">Provinsi</option><option value="nasional">Nasional</option></select></div>
-<div class="field"><label>Provinsi</label><select id="province-select"><option value="">Memuat provinsi…</option></select></div>
-<div class="field"><label>Kabupaten/Kota</label><select id="regency-select" disabled><option value="">Pilih provinsi dahulu</option></select></div>
-<div class="field"><label>Kecamatan</label><select id="district-select" disabled><option value="">Pilih kabupaten/kota dahulu</option></select></div>
-<div class="field"><label>Kelurahan/Desa</label><select id="village-select" disabled><option value="">Pilih kecamatan dahulu</option></select></div>
 </div>
-<div class="field"><label>Lokasi manual (jika tidak ada dalam daftar)</label><input id="location-manual" placeholder="Contoh: kawasan Pasar Bahagia, Tanjungbalai"></div>
-<div class="field"><label>Lokasi kejadian yang lebih tepat (opsional)</label><input id="location-detail" placeholder="Contoh: halaman SMA Negeri 1, Jalan ..."></div>
-<div class="field"><label>Ringkasan lokasi terpilih</label><input id="region-display" readonly placeholder="Lokasi akan tampil di sini"></div>
-<div class="field"><label>Status berita</label><select id="status"><option value="draft">Draf</option><option value="review">Dalam pemeriksaan</option><option value="published">Terbit</option><option value="archived">Arsip</option></select></div>
-<div class="toolbar"><button class="button" id="save-btn">Simpan Berita</button><button class="button secondary" type="button" id="cancel-btn">Kosongkan Form</button></div>
-</form><div id="article-message" class="status">Siap.</div></div>
-<div class="page"><h2>Daftar Berita</h2><div class="tablewrap"><table><thead><tr><th>Judul</th><th>Wilayah</th><th>Status</th><th>Tanggal</th><th>Aksi</th></tr></thead><tbody id="article-list"><tr><td colspan="5">Login untuk melihat data.</td></tr></tbody></table></div></div>
-</section></main><footer class="footer"><div class="container">LAPOR BERITA · Panel Admin</div></footer>
-</body></html>
+</header>
+
+<main class="container">
+
+<section class="page" id="login-panel">
+<h1>Login Admin</h1>
+<p class="muted">Masuk menggunakan akun admin Supabase yang sudah diberi hak akses.</p>
+<form id="login-form">
+<div class="field"><label>Email</label><input id="email" type="email" autocomplete="username" required></div>
+<div class="field"><label>Kata sandi</label><input id="password" type="password" autocomplete="current-password" required></div>
+<button class="button">Masuk</button>
+</form>
+<div id="login-message" class="status">Memeriksa konfigurasi…</div>
+</section>
+
+<section id="admin-panel" class="hidden">
+
+<div class="page">
+<h1>Dashboard Admin</h1>
+<p id="session-info" class="notice"></p>
+<div class="toolbar">
+<button id="refresh-btn" class="button secondary">Muat ulang</button>
+<button id="logout-btn" class="button danger">Keluar</button>
+</div>
+</div>
+
+<!-- LAPORAN MASYARAKAT -->
+<div class="page">
+<h2>Laporan Masyarakat</h2>
+<p class="muted">Periksa laporan yang dikirim masyarakat. Laporan hanya diterbitkan setelah diperiksa dan disetujui admin.</p>
+<div class="tablewrap">
+<table>
+<thead>
+<tr>
+<th>Judul Laporan</th>
+<th>Status</th>
+<th>Tanggal</th>
+<th>Aksi</th>
+</tr>
+</thead>
+<tbody id="report-list">
+<tr><td colspan="4">Memuat laporan...</td></tr>
+</tbody>
+</table>
+</div>
+<div id="report-message" class="status">Menyiapkan daftar laporan...</div>
+<div id="report-detail-panel" class="hidden">
+<h3>Rincian Laporan</h3>
+<div id="report-detail" class="report-detail"></div>
+<div class="toolbar" style="margin-top:12px">
+<button type="button" id="close-report-btn" class="button secondary">Tutup Rincian</button>
+</div>
+</div>
+</div>
+
+<!-- FORM BERITA LAMA -->
+<div class="page">
+<h2 id="form-title">Buat Berita</h2>
+<p class="muted">Tulis berita sendiri atau tempel tautan sumber untuk repost. Periksa dan sunting isi sebelum diterbitkan.</p>
+
+<form id="article-form">
+<input type="hidden" id="article-id">
+
+<div class="field">
+<label>Tautan sumber untuk repost (opsional)</label>
+<input id="source" type="url" placeholder="https://situsberita.id/artikel...">
+</div>
+
+<div class="toolbar">
+<button type="button" id="fetch-btn" class="button">Tarik Data Berita</button>
+<span class="muted">Jika tautan gagal diambil, isi berita secara manual.</span>
+</div>
+
+<div class="field">
+<label>Judul berita</label>
+<input id="title" maxlength="250" required>
+</div>
+
+<div class="field">
+<label>Ringkasan</label>
+<textarea id="summary" rows="3"></textarea>
+</div>
+
+<div class="field">
+<label>Isi berita</label>
+<textarea id="body" required rows="8"></textarea>
+</div>
+
+<div class="field">
+<label>Foto utama — URL atau unggah</label>
+<input id="image" type="url" placeholder="https://...">
+<input id="image-file" type="file" accept="image/*" style="margin-top:8px">
+<small class="muted">Unggahan foto belum disimpan ke Storage; gunakan URL foto sampai Storage disiapkan.</small>
+</div>
+
+<div class="field">
+<label>Foto/video tambahan (maksimal 10 berkas)</label>
+<input id="media-files" type="file" accept="image/*,video/*" multiple>
+<small class="muted">Pratinjau pilihan saja. Penyimpanan berkas memerlukan pengaturan Supabase Storage.</small>
+<div id="media-preview"></div>
+</div>
+
+<hr>
+<h3>Lokasi Berita</h3>
+<p class="location-help">Pilih lokasi bertingkat. Jika lokasi tidak tersedia, isi lokasi manual. Periksa kembali wilayah sebelum menyimpan.</p>
+
+<div class="location-grid">
+<div class="field">
+<label>Jenis wilayah</label>
+<select id="region-type">
+<option value="">Pilih jenis wilayah</option>
+<option value="desa">Desa/Kelurahan</option>
+<option value="kecamatan">Kecamatan</option>
+<option value="kabupaten">Kabupaten</option>
+<option value="kota">Kota</option>
+<option value="provinsi">Provinsi</option>
+<option value="nasional">Nasional</option>
+</select>
+</div>
+
+<div class="field">
+<label>Provinsi</label>
+<select id="province-select"><option value="">Memuat provinsi…</option></select>
+</div>
+
+<div class="field">
+<label>Kabupaten/Kota</label>
+<select id="regency-select" disabled><option value="">Pilih provinsi dahulu</option></select>
+</div>
+
+<div class="field">
+<label>Kecamatan</label>
+<select id="district-select" disabled><option value="">Pilih kabupaten/kota dahulu</option></select>
+</div>
+
+<div class="field">
+<label>Kelurahan/Desa</label>
+<select id="village-select" disabled><option value="">Pilih kecamatan dahulu</option></select>
+</div>
+</div>
+
+<div class="field">
+<label>Lokasi manual (jika tidak ada dalam daftar)</label>
+<input id="location-manual" placeholder="Contoh: kawasan Pasar Bahagia, Tanjungbalai">
+</div>
+
+<div class="field">
+<label>Lokasi kejadian yang lebih tepat (opsional)</label>
+<input id="location-detail" placeholder="Contoh: halaman sekolah, Jalan ...">
+</div>
+
+<div class="field">
+<label>Ringkasan lokasi terpilih</label>
+<input id="region-display" readonly placeholder="Lokasi akan tampil di sini">
+</div>
+
+<div class="field">
+<label>Status berita</label>
+<select id="status">
+<option value="draft">Draf</option>
+<option value="review">Dalam pemeriksaan</option>
+<option value="published">Terbit</option>
+<option value="archived">Arsip</option>
+</select>
+</div>
+
+<div class="toolbar">
+<button class="button" id="save-btn">Simpan Berita</button>
+<button class="button secondary" type="button" id="cancel-btn">Kosongkan Form</button>
+</div>
+</form>
+<div id="article-message" class="status">Siap.</div>
+</div>
+
+<div class="page">
+<h2>Daftar Berita</h2>
+<div class="tablewrap">
+<table>
+<thead>
+<tr><th>Judul</th><th>Wilayah</th><th>Status</th><th>Tanggal</th><th>Aksi</th></tr>
+</thead>
+<tbody id="article-list">
+<tr><td colspan="5">Login untuk melihat data.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+</section>
+</main>
+
+<footer class="footer">
+<div class="container">LAPOR BERITA · Panel Admin</div>
+</footer>
+</body>
+</html>
