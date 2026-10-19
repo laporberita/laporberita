@@ -1,1 +1,39 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#102a43"><title>Pencarian Berita — LAPOR BERITA</title><link rel="stylesheet" href="style.css"></head><body><div id="site-header"></div><main class="container page"><h1>Pencarian Berita</h1><form id="search-form" class="search-form"><input id="q" type="search" placeholder="Cari judul, isi, atau kategori..." aria-label="Cari berita" required><button class="button" type="submit">Cari</button></form><div id="search-results" class="cards"></div><div id="database-status" class="notice">Menghubungkan ke database...</div></main><div id="site-footer"></div><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="supabase-config.js"></script><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <title>Pencarian Berita — LAPOR BERITA</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="site-header">
+    <header class="masthead">
+      <div class="container mastrow">
+        <a class="brand" href="index.html">
+          <img src="logo-lapor-berita.jpg"
+               alt="LAPOR BERITA — Laporan Berita Pendidikan Indonesia"
+               style="display:block;width:100%;max-width:360px;height:auto;object-fit:contain;">
+        </a>
+        <a class="button" href="index.html">Beranda</a>
+      </div>
+    </header>
+  </div>
+
+  <main class="container page">
+    <h1>Pencarian Berita</h1>
+    <form id="search-form" class="search-form">
+      <input id="q" type="search" placeholder="Cari judul, isi, atau kategori..." aria-label="Cari berita" required>
+      <button class="button" type="submit">Cari</button>
+    </form>
+    <div id="search-results" class="cards"></div>
+    <div id="database-status" class="notice">Menghubungkan ke database...</div>
+  </main>
+
+  <div id="site-footer"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
