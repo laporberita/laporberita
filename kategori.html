@@ -1,1 +1,107 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Berita Wilayah — LAPOR BERITA</title><link rel="stylesheet" href="style.css"><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="supabase-config.js"></script></head><body><header class="masthead"><div class="container mastrow"><a class="brand" href="index.html"><span class="brand-icon">▱<small>◆</small></span><span><b>LAPOR BERITA</b><small>Media Berita Pendidikan Indonesia</small></span></a><a class="button" href="index.html">Beranda</a></div></header><nav class="nav"><div class="container navrow"><a href="index.html">Beranda</a><a href="kategori.html?wilayah=provinsi">Provinsi</a><a href="kategori.html?wilayah=kabupaten">Kabupaten</a><a href="kategori.html?wilayah=kota">Kota</a><a href="kategori.html?wilayah=nasional">Nasional</a></div></nav><main class="container"><section class="page"><h1 id="heading">Berita Pendidikan</h1><form id="filter-form" class="search" style="width:100%;margin-bottom:18px"><input id="q" placeholder="Cari judul atau isi berita"><button>Cari</button></form><div id="results" class="article-grid"><p class="muted">Memuat berita…</p></div></section></main><footer class="footer"><div class="container">LAPOR BERITA · Media Berita Pendidikan Indonesia</div></footer><script>const cfg=window.LAPOR_BERITA_CONFIG;const db=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);const params=new URLSearchParams(location.search);const w=params.get('wilayah')||'';const names={provinsi:'Pendidikan Provinsi',kabupaten:'Pendidikan Kabupaten',kota:'Pendidikan Kota',nasional:'Pendidikan Nasional'};document.getElementById('heading').textContent=names[w]||'Semua Berita Pendidikan';document.getElementById('q').value=params.get('q')||'';document.getElementById('filter-form').onsubmit=e=>{e.preventDefault();params.set('q',document.getElementById('q').value.trim());location.search=params.toString()};const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));(async()=>{let query=db.from('articles').select('id,title,summary,image_path,published_at,province,regency,city,region_type').eq('status','published').order('published_at',{ascending:false}).limit(60);if(w)query=query.eq('region_type',w);const q=params.get('q');if(q)query=query.ilike('title','%'+q+'%');const {data,error}=await query;const root=document.getElementById('results');if(error){root.innerHTML='<p class="muted">Berita belum dapat dimuat. Pastikan konfigurasi database dan izin baca sudah benar.</p>';return}root.innerHTML=(data||[]).map(a=>`<article class="article-card"><a href="artikel.html?id=${encodeURIComponent(a.id)}"><img src="${esc(a.image_path||'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=700&q=75')}" alt=""><div class="pad"><span class="tag">${esc(a.city||a.regency||a.province||a.region_type||'Pendidikan')}</span><h3>${esc(a.title)}</h3><small>${a.published_at?new Date(a.published_at).toLocaleDateString('id-ID'):'Berita pendidikan'}</small></div></a></article>`).join('')||'<p class="muted">Belum ada berita untuk pilihan ini.</p>'})();</script></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Berita Wilayah — LAPOR BERITA</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="container mastrow">
+      <a class="brand" href="index.html">
+        <img src="logo-lapor-berita.jpg"
+             alt="LAPOR BERITA — Laporan Berita Pendidikan Indonesia"
+             style="display:block;width:100%;max-width:360px;height:auto;object-fit:contain;">
+      </a>
+      <a class="button" href="index.html">Beranda</a>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <div class="container navrow">
+      <a href="index.html">Beranda</a>
+      <a href="kategori.html?wilayah=provinsi">Provinsi</a>
+      <a href="kategori.html?wilayah=kabupaten">Kabupaten</a>
+      <a href="kategori.html?wilayah=kota">Kota</a>
+      <a href="kategori.html?wilayah=nasional">Nasional</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <section class="page">
+      <h1 id="heading">Berita Pendidikan</h1>
+      <form id="filter-form" class="search" style="width:100%;margin-bottom:18px">
+        <input id="q" placeholder="Cari judul atau isi berita">
+        <button>Cari</button>
+      </form>
+      <div id="results" class="article-grid"><p class="muted">Memuat berita…</p></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">LAPOR BERITA · Laporan Berita Pendidikan Indonesia</div>
+  </footer>
+
+  <script>
+    const cfg = window.LAPOR_BERITA_CONFIG;
+    const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY);
+    const params = new URLSearchParams(location.search);
+    const w = params.get('wilayah') || '';
+    const names = {
+      provinsi: 'Pendidikan Provinsi',
+      kabupaten: 'Pendidikan Kabupaten',
+      kota: 'Pendidikan Kota',
+      nasional: 'Pendidikan Nasional'
+    };
+
+    document.getElementById('heading').textContent = names[w] || 'Semua Berita Pendidikan';
+    document.getElementById('q').value = params.get('q') || '';
+
+    document.getElementById('filter-form').onsubmit = e => {
+      e.preventDefault();
+      params.set('q', document.getElementById('q').value.trim());
+      location.search = params.toString();
+    };
+
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+
+    (async () => {
+      let query = db.from('articles')
+        .select('id,title,summary,image_path,published_at,province,regency,city,region_type')
+        .eq('status', 'published')
+        .order('published_at', { ascending: false })
+        .limit(60);
+
+      if (w) query = query.eq('region_type', w);
+
+      const q = params.get('q');
+      if (q) query = query.ilike('title', '%' + q + '%');
+
+      const { data, error } = await query;
+      const root = document.getElementById('results');
+
+      if (error) {
+        root.innerHTML = '<p class="muted">Berita belum dapat dimuat. Pastikan konfigurasi database dan izin baca sudah benar.</p>';
+        return;
+      }
+
+      root.innerHTML = (data || []).map(a => `
+        <article class="article-card">
+          <a href="artikel.html?id=${encodeURIComponent(a.id)}">
+            <img src="${esc(a.image_path || 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=700&q=75')}" alt="">
+            <div class="pad">
+              <span class="tag">${esc(a.city || a.regency || a.province || a.region_type || 'Pendidikan')}</span>
+              <h3>${esc(a.title)}</h3>
+              <small>${a.published_at ? new Date(a.published_at).toLocaleDateString('id-ID') : 'Berita pendidikan'}</small>
+            </div>
+          </a>
+        </article>`).join('') || '<p class="muted">Belum ada berita untuk pilihan ini.</p>';
+    })();
+  </script>
+</body>
+</html>
