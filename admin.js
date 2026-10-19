@@ -68,11 +68,16 @@
 
   function setBusy(value) {
     busy = value;
-    ['save-btn', 'fetch-btn', 'refresh-btn', 'logout-btn']
-      .forEach(id => {
-        const el = $(id);
-        if (el) el.disabled = value;
-      });
+
+    [
+      'save-btn',
+      'fetch-btn',
+      'refresh-btn',
+      'logout-btn'
+    ].forEach(id => {
+      const el = $(id);
+      if (el) el.disabled = value;
+    });
   }
 
   function checkConfig() {
@@ -112,7 +117,6 @@
 
     currentUser = userResult.user;
 
-    // Hak admin wajib diperiksa di database.
     const { data, error } = await db.rpc('is_site_admin');
 
     if (error) {
@@ -122,9 +126,7 @@
       );
     }
 
-    const authorized = data === true;
-
-    if (!authorized) {
+    if (data !== true) {
       await db.auth.signOut();
       currentUser = null;
       throw new Error(
@@ -137,7 +139,6 @@
 
   async function login(event) {
     event.preventDefault();
-
     if (busy) return;
 
     const email = $('email')?.value.trim();
@@ -181,7 +182,7 @@
   }
 
   async function logout() {
-    if (!db) return;
+    if (!db || busy) return;
 
     setBusy(true);
 
@@ -200,7 +201,7 @@
   }
 
   async function refreshAll() {
-    if (!db || !currentUser) return;
+    if (!db || !currentUser || busy) return;
 
     setBusy(true);
     message('report-message', 'Memuat laporan...');
@@ -243,11 +244,13 @@
       message('report-message', 'Laporan dimuat: ' + reports.length);
     } catch (error) {
       console.error('Gagal memuat panel:', error);
+
       message(
         'article-message',
         'Gagal memuat berita: ' + error.message,
         true
       );
+
       message(
         'report-message',
         'Gagal memuat laporan: ' + error.message,
@@ -262,10 +265,16 @@
     const tbody = $('article-list');
     if (!tbody) return;
 
-    const published = articles.filter(a => a.status === 'published').length;
+    const published = articles.filter(
+      article => article.status === 'published'
+    ).length;
 
     if ($('total-articles')) {
       $('total-articles').textContent = articles.length;
+    }
+
+    if ($('published-articles')) {
+      $('published-articles').textContent = published;
     }
 
     if (!articles.length) {
@@ -274,35 +283,37 @@
       return;
     }
 
-    tbody.innerHTML = articles.map(a => {
+    tbody.innerHTML = articles.map(article => {
       const location = [
-        a.village,
-        a.district,
-        a.location_manual
+        article.village,
+        article.district,
+        article.location_manual
       ].filter(Boolean).join(', ');
 
       return `
         <tr>
-          <td>${esc(a.title)}</td>
+          <td>${esc(article.title)}</td>
           <td>${esc(location || '-')}</td>
-          <td>${esc(a.status || '-')}</td>
-          <td>${esc(date(a.created_at))}</td>
+          <td>${esc(article.status || '-')}</td>
+          <td>${esc(date(article.created_at))}</td>
           <td>
             <div class="toolbar">
-              <button type="button" class="button secondary"
-                data-edit-article="${esc(a.id)}">Edit</button>
-              <button type="button" class="button danger"
-                data-delete-article="${esc(a.id)}">Hapus</button>
+              <button type="button"
+                class="button secondary"
+                data-edit-article="${esc(article.id)}">
+                Edit
+              </button>
+
+              <button type="button"
+                class="button danger"
+                data-delete-article="${esc(article.id)}">
+                Hapus Permanen
+              </button>
             </div>
           </td>
         </tr>
       `;
     }).join('');
-
-    // Statistik hanya diperbarui jika elemen tersedia.
-    if ($('published-articles')) {
-      $('published-articles').textContent = published;
-    }
   }
 
   function renderReports() {
@@ -322,10 +333,23 @@
         <td>${esc(date(report.created_at))}</td>
         <td>
           <div class="report-actions">
-            <button type="button" class="button secondary"
-              data-view-report="${esc(report.id)}">Periksa</button>
-            <button type="button" class="button"
-              data-use-report="${esc(report.id)}">Jadikan draf</button>
+            <button type="button"
+              class="button secondary"
+              data-view-report="${esc(report.id)}">
+              Periksa
+            </button>
+
+            <button type="button"
+              class="button"
+              data-use-report="${esc(report.id)}">
+              Jadikan draf
+            </button>
+
+            <button type="button"
+              class="button danger"
+              data-delete-report="${esc(report.id)}">
+              Hapus Permanen
+            </button>
           </div>
         </td>
       </tr>
@@ -338,21 +362,17 @@
     if ($('article-id')) $('article-id').value = '';
     if ($('form-title')) $('form-title').textContent = 'Buat Berita';
     if ($('status')) $('status').value = 'draft';
-    if ($('province-select')) {
-      $('province-select').value = '';
-    }
-    if ($('regency-select')) {
-      $('regency-select').value = '';
-    }
-    if ($('district-select')) {
-      $('district-select').value = '';
-    }
-    if ($('village-select')) {
-      $('village-select').value = '';
-    }
-    if ($('region-display')) {
-      $('region-display').value = '';
-    }
+
+    [
+      'province-select',
+      'regency-select',
+      'district-select',
+      'village-select',
+      'region-display'
+    ].forEach(id => {
+      if ($(id)) $(id).value = '';
+    });
+
     if ($('media-preview')) $('media-preview').replaceChildren();
 
     mediaUrls.forEach(url => URL.revokeObjectURL(url));
@@ -393,36 +413,33 @@
       $('form-title').textContent = 'Edit Berita';
     }
 
-    message('article-message', 'Berita dimuat ke formulir. Periksa sebelum menyimpan.');
+    message(
+      'article-message',
+      'Berita dimuat ke formulir. Periksa sebelum menyimpan.'
+    );
+
     $('article-form')?.scrollIntoView({ behavior: 'smooth' });
   }
 
   function getLocationValues() {
-    const district = $('district-select')?.value || '';
-    const village = $('village-select')?.value || '';
-    const manual = $('location-manual')?.value.trim() || '';
-    const detail = $('location-detail')?.value.trim() || '';
-
-    // Kolom province/regency/region_type tidak dikirim karena
-    // belum termasuk kolom articles yang terkonfirmasi.
     return {
-      district,
-      village,
-      location_manual: manual,
-      location_detail: detail
+      district: $('district-select')?.value || '',
+      village: $('village-select')?.value || '',
+      location_manual: $('location-manual')?.value.trim() || '',
+      location_detail: $('location-detail')?.value.trim() || ''
     };
   }
 
   async function saveArticle(event) {
     event.preventDefault();
-
     if (busy) return;
 
     setBusy(true);
     message('article-message', 'Menyimpan berita...');
 
     try {
-      await verifyAdmin();
+      const authorized = await verifyAdmin();
+      if (!authorized) throw new Error('Sesi admin tidak aktif.');
 
       const id = $('article-id')?.value || '';
       const title = $('title')?.value.trim() || '';
@@ -443,11 +460,10 @@
       const source_url = sourceRaw ? validUrl(sourceRaw) : null;
       const image_path = imageRaw ? validUrl(imageRaw) : null;
 
-      const existing = articles.find(a => a.id === id);
+      const existing = articles.find(article => article.id === id);
       const slugBase = slugify(title) || 'berita';
-      const slug = existing?.slug || (
-        slugBase + '-' + Date.now().toString(36)
-      );
+      const slug = existing?.slug ||
+        (slugBase + '-' + Date.now().toString(36));
 
       const record = {
         title,
@@ -487,6 +503,7 @@
       await refreshAll();
     } catch (error) {
       console.error('Simpan berita gagal:', error);
+
       message(
         'article-message',
         'Berita gagal disimpan: ' + error.message,
@@ -499,16 +516,20 @@
 
   async function deleteArticle(id) {
     const article = articles.find(item => item.id === id);
-    if (!article) return;
+    if (!article || busy) return;
 
-    if (!confirm(
-      'Hapus berita "' + article.title + '"? Tindakan ini tidak dapat dibatalkan.'
-    )) return;
+    const confirmed = confirm(
+      'HAPUS PERMANEN berita "' + article.title +
+      '"?\n\nTindakan ini tidak dapat dibatalkan.'
+    );
+
+    if (!confirmed) return;
 
     setBusy(true);
 
     try {
-      await verifyAdmin();
+      const authorized = await verifyAdmin();
+      if (!authorized) throw new Error('Sesi admin tidak aktif.');
 
       const { error } = await db.from('articles')
         .delete()
@@ -516,10 +537,71 @@
 
       if (error) throw error;
 
-      message('article-message', 'Berita berhasil dihapus.');
+      if ($('article-id')?.value === id) {
+        resetForm();
+      }
+
+      message('article-message', 'Berita berhasil dihapus permanen.');
       await refreshAll();
     } catch (error) {
-      message('article-message', 'Gagal menghapus berita: ' + error.message, true);
+      console.error('Hapus berita gagal:', error);
+
+      message(
+        'article-message',
+        'Gagal menghapus berita: ' + error.message,
+        true
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteReport(id) {
+    const report = reports.find(item => item.id === id);
+    if (!report || busy) return;
+
+    const confirmed = confirm(
+      'HAPUS PERMANEN laporan "' +
+      (report.title || '(Tanpa judul)') +
+      '"?\n\nLaporan dan data pribadi terkait di database akan dihapus. Tindakan ini tidak dapat dibatalkan.'
+    );
+
+    if (!confirmed) return;
+
+    setBusy(true);
+    message('report-message', 'Menghapus laporan secara permanen...');
+
+    try {
+      const authorized = await verifyAdmin();
+      if (!authorized) throw new Error('Sesi admin tidak aktif.');
+
+      const { data, error } = await db.rpc(
+        'admin_delete_public_report',
+        { p_report_id: id }
+      );
+
+      if (error) throw error;
+
+      if (data !== true) {
+        throw new Error('Laporan tidak ditemukan atau sudah dihapus.');
+      }
+
+      if (activeReport?.id === id) {
+        $('report-detail-panel')?.classList.add('hidden');
+        activeReport = null;
+      }
+
+      message('report-message', 'Laporan berhasil dihapus permanen.');
+
+      await refreshAll();
+    } catch (error) {
+      console.error('Hapus laporan gagal:', error);
+
+      message(
+        'report-message',
+        'Gagal menghapus laporan: ' + error.message,
+        true
+      );
     } finally {
       setBusy(false);
     }
@@ -532,8 +614,8 @@
     activeReport = report;
 
     const detail = $('report-detail');
+
     if (detail) {
-      // Data pribadi pelapor tidak diambil dari tabel ini.
       detail.textContent =
         'Judul: ' + (report.title || '-') + '\n\n' +
         'Isi laporan:\n' + (report.body || '-') + '\n\n' +
@@ -569,7 +651,11 @@
     const raw = $('source')?.value.trim();
 
     if (!raw) {
-      message('article-message', 'Masukkan tautan sumber terlebih dahulu.', true);
+      message(
+        'article-message',
+        'Masukkan tautan sumber terlebih dahulu.',
+        true
+      );
       return;
     }
 
@@ -582,12 +668,15 @@
       return;
     }
 
+    if (busy) return;
+
     setBusy(true);
-    message('article-message', 'Mencoba mengambil judul dan ringkasan dari tautan...');
+    message(
+      'article-message',
+      'Mencoba mengambil judul dan ringkasan dari tautan...'
+    );
 
     try {
-      // Banyak situs menolak permintaan lintas domain (CORS).
-      // Kegagalan tidak akan menghapus isi formulir.
       const response = await fetch(url, {
         method: 'GET',
         mode: 'cors',
@@ -596,7 +685,9 @@
       });
 
       if (!response.ok) {
-        throw new Error('Situs sumber menolak permintaan (' + response.status + ').');
+        throw new Error(
+          'Situs sumber menolak permintaan (' + response.status + ').'
+        );
       }
 
       const html = await response.text();
@@ -619,8 +710,13 @@
         meta('meta[property="og:image"]') ||
         meta('meta[name="twitter:image"]') || '';
 
-      if (title && !$('title').value.trim()) $('title').value = title;
-      if (summary && !$('summary').value.trim()) $('summary').value = summary;
+      if (title && !$('title').value.trim()) {
+        $('title').value = title;
+      }
+
+      if (summary && !$('summary').value.trim()) {
+        $('summary').value = summary;
+      }
 
       if (image && !$('image').value.trim()) {
         try {
@@ -661,8 +757,10 @@
     const files = Array.from(input.files || []).slice(0, 10);
 
     files.forEach(file => {
-      if (!file.type.startsWith('image/') &&
-          !file.type.startsWith('video/')) return;
+      if (
+        !file.type.startsWith('image/') &&
+        !file.type.startsWith('video/')
+      ) return;
 
       const url = URL.createObjectURL(file);
       mediaUrls.push(url);
@@ -686,13 +784,18 @@
       }
 
       const label = document.createElement('div');
-      label.textContent = file.name + ' — pratinjau lokal, belum diunggah';
+      label.textContent =
+        file.name + ' — pratinjau lokal, belum diunggah';
+
       item.appendChild(label);
       preview.appendChild(item);
     });
 
     if ((input.files || []).length > 10) {
-      message('article-message', 'Hanya 10 berkas pertama yang ditampilkan.');
+      message(
+        'article-message',
+        'Hanya 10 berkas pertama yang ditampilkan.'
+      );
     }
   }
 
@@ -712,8 +815,6 @@
   }
 
   function setupLocationNotice() {
-    // Data lokasi tidak diisi dengan daftar palsu.
-    // Dropdown harus dihubungkan ke sumber data wilayah yang benar.
     const province = $('province-select');
     const regency = $('regency-select');
     const district = $('district-select');
@@ -763,21 +864,33 @@
     $('fetch-btn')?.addEventListener('click', fetchMetadata);
     $('cancel-btn')?.addEventListener('click', resetForm);
     $('media-files')?.addEventListener('change', previewMedia);
+
     $('close-report-btn')?.addEventListener('click', () => {
       $('report-detail-panel')?.classList.add('hidden');
       activeReport = null;
     });
 
     document.addEventListener('click', event => {
-      const edit = event.target.closest('[data-edit-article]');
-      const remove = event.target.closest('[data-delete-article]');
-      const view = event.target.closest('[data-view-report]');
-      const use = event.target.closest('[data-use-report]');
+      const target = event.target;
+      if (!(target instanceof Element)) return;
 
-      if (edit) editArticle(edit.dataset.editArticle);
-      if (remove) deleteArticle(remove.dataset.deleteArticle);
-      if (view) showReport(view.dataset.viewReport);
-      if (use) useReportAsDraft(use.dataset.useReport);
+      const edit = target.closest('[data-edit-article]');
+      const removeArticle = target.closest('[data-delete-article]');
+      const removeReport = target.closest('[data-delete-report]');
+      const view = target.closest('[data-view-report]');
+      const use = target.closest('[data-use-report]');
+
+      if (edit) {
+        editArticle(edit.dataset.editArticle);
+      } else if (removeArticle) {
+        deleteArticle(removeArticle.dataset.deleteArticle);
+      } else if (removeReport) {
+        deleteReport(removeReport.dataset.deleteReport);
+      } else if (view) {
+        showReport(view.dataset.viewReport);
+      } else if (use) {
+        useReportAsDraft(use.dataset.useReport);
+      }
     });
   }
 
@@ -813,6 +926,7 @@
     } catch (error) {
       console.error('Inisialisasi admin gagal:', error);
       showLogin();
+
       message(
         'login-message',
         'Panel belum siap: ' + error.message,
