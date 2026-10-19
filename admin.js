@@ -250,9 +250,12 @@
         '<td>' + esc(statusLabel) + '</td>' +
         '<td>' + esc(date(article.created_at)) + '</td>' +
         '<td><div class="article-actions">' +
-          '<button type="button" class="button secondary" data-edit-article="' + esc(article.id) + '">Edit</button>' +
+          '<button type="button" class="button secondary" data-edit-article="' + esc(article.id) + '">Edit / Tinjau</button>' +
+          '<button type="button" class="button" data-set-article-status="review" data-article-id="' + esc(article.id) + '">Tinjau</button>' +
+          '<button type="button" class="button secondary" data-set-article-status="draft" data-article-id="' + esc(article.id) + '">Jadikan Draf</button>' +
+          '<button type="button" class="button" data-set-article-status="published" data-article-id="' + esc(article.id) + '">Terbitkan</button>' +
           publicLink +
-          '<button type="button" class="button danger" data-delete-article="' + esc(article.id) + '">Hapus Permanen</button>' +
+          '<button type="button" class="button danger" data-delete-article="' + esc(article.id) + '">Hapus</button>' +
         '</div></td></tr>';
     }).join('');
   }
@@ -269,8 +272,9 @@
       '<td>' + esc(report.status || 'submitted') + '</td>' +
       '<td>' + esc(date(report.created_at)) + '</td>' +
       '<td><div class="report-actions">' +
-        '<button type="button" class="button secondary" data-view-report="' + esc(report.id) + '">Periksa</button>' +
+        '<button type="button" class="button secondary" data-view-report="' + esc(report.id) + '">Tinjau</button>' +
         '<button type="button" class="button" data-use-report="' + esc(report.id) + '">Jadikan Draf</button>' +
+        '<button type="button" class="button" data-publish-report="' + esc(report.id) + '">Terbitkan Berita</button>' +
         '<button type="button" class="button danger" data-delete-report="' + esc(report.id) + '">Hapus Permanen</button>' +
       '</div></td></tr>'
     ).join('');
@@ -421,6 +425,30 @@
     return await db.from('articles').insert(record).select('id').single();
   }
 
+  async function setArticleStatus(id, status) {
+    const article = articles.find(item => item.id === id);
+    if (!article) return;
+    const labels = { published: 'menerbitkan ke publik', draft: 'menjadikan draf', review: 'memindahkan ke tinjauan' };
+    if (!labels[status]) return;
+    if (status === 'published' && !confirm('Terbitkan "' + article.title + '" ke publik sekarang? Pastikan isi dan sumber telah diperiksa.')) return;
+    if (status !== 'published' && !confirm('Ubah status berita "' + article.title + '" menjadi ' + status + '?')) return;
+    setActionBusy(true);
+    message('article-message', 'Memperbarui status berita…');
+    try {
+      const update = { status, published_at: status === 'published' ? (article.published_at || new Date().toISOString()) : null };
+      const result = await db.from('articles').update(update).eq('id', id).select('id').maybeSingle();
+      if (result.error) throw result.error;
+      if (!result.data) throw new Error('Status tidak berubah. Periksa izin admin/RLS pada tabel articles.');
+      message('article-message', 'Berhasil ' + labels[status] + '.');
+      await refreshAll();
+    } catch (error) {
+      console.error('Perubahan status gagal:', error);
+      message('article-message', 'Gagal mengubah status: ' + error.message, true);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function deleteArticle(id) {
     if (actionRunning) return;
     const article = articles.find(item => item.id === id);
@@ -502,35 +530,160 @@
   }
 
   async function fetchMetadata() {
-    if (actionRunning) return;
-    const raw = $('source')?.value.trim() || '';
+    const raw = $('source')?.value?.trim();
     if (!raw) {
-      message('article-message', 'Masukkan tautan sumber terlebih dahulu.', true);
+      message('article-message', 'Masukkan tautan sumber berita terlebih dahulu.', true);
       return;
     }
     let url;
     try { url = validUrl(raw); }
     catch (error) { message('article-message', error.message, true); return; }
+
     setActionBusy(true);
-    message('article-message', 'Mencoba mengambil judul dan ringkasan dari tautan…');
+    message('article-message', 'Mengambil judul, gambar, dan isi berita dari tautan…');
     try {
-      const response = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', redirect: 'follow' });
-      if (!response.ok) throw new Error('Situs sumber menolak permintaan (' + response.status + ').');
-      const html = await response.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      const meta = selector => doc.querySelector(selector)?.getAttribute('content')?.trim() || '';
-      const title = meta('meta[property="og:title"]') || meta('meta[name="twitter:title"]') || doc.querySelector('title')?.textContent?.trim() || '';
-      const summary = meta('meta[property="og:description"]') || meta('meta[name="description"]') || meta('meta[name="twitter:description"]') || '';
-      const image = meta('meta[property="og:image"]') || meta('meta[name="twitter:image"]') || '';
+      let title = '', summary = '', image = '', body = '';
+      const metaFromHtml = html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const meta = selector => doc.querySelector(selector)?.getAttribute('content')?.trim() || '';
+        const absolute = value => { try { return value ? new URL(value, url).href : ''; } catch (_) { return ''; } };
+        return {
+          title: meta('meta[property="og:title"]') || meta('meta[name="twitter:title"]') || doc.querySelector('h1')?.textContent?.trim() || doc.querySelector('title')?.textContent?.trim() || '',
+          summary: meta('meta[property="og:description"]') || meta('meta[name="description"]') || meta('meta[name="twitter:description"]') || '',
+          image: absolute(meta('meta[property="og:image"]') || meta('meta[name="twitter:image"]') || meta('meta[itemprop="image"]')),
+          body: Array.from(doc.querySelectorAll('article p, main p, [itemprop="articleBody"] p'))
+            .map(p => p.textContent.trim()).filter(t => t.length > 35).join('\n\n')
+        };
+      };
+
+      // Try direct fetch first; many news sites block browser access through CORS.
+      try {
+        const response = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', redirect: 'follow' });
+        if (response.ok) {
+          const found = metaFromHtml(await response.text());
+          title = found.title; summary = found.summary; image = found.image; body = found.body;
+        }
+      } catch (_) {}
+
+      // Reader fallback can extract metadata and readable article text when direct fetch is blocked.
+      if (!title || !summary || !body || !image) {
+        const response = await fetch('https://r.jina.ai/' + url, { method: 'GET', credentials: 'omit' });
+        if (!response.ok) throw new Error('Layanan pembaca tautan menjawab ' + response.status);
+        const text = await response.text();
+        const lines = text.split(/\r?\n/);
+        const cleanLines = lines.map(line => line.trim()).filter(Boolean);
+        if (!title) {
+          const titleLine = cleanLines.find(line => /^Title:\s*/i.test(line));
+          const heading = cleanLines.find(line => /^#{1,2}\s+/.test(line));
+          title = titleLine ? titleLine.replace(/^Title:\s*/i, '').trim()
+            : heading ? heading.replace(/^#{1,2}\s+/, '').replace(/\s+#+$/, '').trim() : '';
+        }
+        // Jina Reader commonly represents article images as Markdown links.
+        if (!image) {
+          const imageMatch = text.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)/i);
+          if (imageMatch) { try { image = new URL(imageMatch[1], url).href; } catch (_) {} }
+        }
+        const contentStart = Math.max(0, lines.findIndex(line => /^Markdown Content:/i.test(line)) + 1);
+        const contentLines = lines.slice(contentStart);
+        const paragraphs = [];
+        let current = [];
+        for (const line of contentLines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            if (current.length) { paragraphs.push(current.join(' ').trim()); current = []; }
+            continue;
+          }
+          if (/^#{1,6}\s/.test(trimmed) || /^Title:/i.test(trimmed) || /^URL Source:/i.test(trimmed) ||
+              /^Published Time:/i.test(trimmed) || /^!\[/.test(trimmed) || /^\[.*\]\(https?:\/\//i.test(trimmed)) {
+            if (current.length) { paragraphs.push(current.join(' ').trim()); current = []; }
+            continue;
+          }
+          current.push(trimmed.replace(/^>\s?/, '').replace(/^\*\s+/, ''));
+        }
+        if (current.length) paragraphs.push(current.join(' ').trim());
+        const usable = paragraphs.filter(p => p.length > 45 && !/^https?:\/\//i.test(p));
+        if (!summary && usable.length) summary = usable[0].slice(0, 500);
+        if (!body && usable.length) body = usable.join('\n\n').slice(0, 100000);
+      }
+
       if (title && !$('title').value.trim()) $('title').value = title;
       if (summary && !$('summary').value.trim()) $('summary').value = summary;
-      if (image && !$('image').value.trim()) {
-        try { $('image').value = new URL(image, url).href; } catch (_) { /* URL foto tidak valid */ }
+      if (body && !$('body').value.trim()) $('body').value = body;
+      if (image && !$('image').value.trim()) $('image').value = image;
+
+      if (title || summary || body || image) {
+        const got = [];
+        if (title) got.push('judul');
+        if (summary) got.push('ringkasan');
+        if (body) got.push('isi berita');
+        if (image) got.push('gambar');
+        message('article-message', 'Berhasil mengambil: ' + got.join(', ') + '. Periksa fakta, hak cipta, dan sunting dengan bahasa sendiri sebelum diterbitkan.');
+      } else {
+        throw new Error('Metadata dan isi artikel tidak ditemukan.');
       }
-      message('article-message', title ? 'Metadata berhasil diambil. Periksa dan tulis isi berita secara layak sebelum diterbitkan.' : 'Judul tidak ditemukan. Silakan isi berita secara manual.');
     } catch (error) {
-      console.warn('Metadata tidak dapat diambil otomatis:', error);
-      message('article-message', 'Situs sumber menolak pengambilan otomatis atau membatasi akses. Isi judul, ringkasan, isi berita, dan URL foto secara manual.');
+      console.warn('Pengambilan metadata repost gagal:', error);
+      message('article-message', 'Gagal mengambil otomatis. Situs sumber mungkin memblokir akses. Coba tautan artikel langsung; bila tetap gagal, isi manual. Tautan sumber tetap tersimpan.', true);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function publishReport(id) {
+    if (actionRunning) return;
+    const report = reports.find(item => String(item.id) === String(id));
+    if (!report) {
+      message('report-message', 'Laporan tidak ditemukan. Muat ulang data.', true);
+      return;
+    }
+    if (report.status === 'approved' && report.published_article_id) {
+      message('report-message', 'Laporan ini sudah diterbitkan. ID berita: ' + report.published_article_id);
+      return;
+    }
+    const ok = confirm('Terbitkan laporan “' + (report.title || '(Tanpa judul)') + '” sebagai berita publik sekarang? Pastikan isi laporan sudah diperiksa. Data pribadi pelapor tidak akan diterbitkan.');
+    if (!ok) return;
+    const title = String(report.title || '').trim();
+    const body = String(report.body || '').trim();
+    if (!title || !body) {
+      message('report-message', 'Laporan tidak memiliki judul atau isi. Buka “Periksa” dan lengkapi sebagai draf terlebih dahulu.', true);
+      return;
+    }
+    setActionBusy(true);
+    message('report-message', 'Menerbitkan laporan sebagai berita publik…');
+    try {
+      const authorized = await verifyAdmin();
+      if (!authorized) throw new Error('Sesi admin tidak aktif. Silakan login kembali.');
+      const now = new Date().toISOString();
+      const slug = (slugify(title) || 'laporan') + '-' + Date.now().toString(36);
+      const record = {
+        title,
+        slug,
+        summary: body.slice(0, 450),
+        body,
+        category_id: report.proposed_category_id || null,
+        source_url: validUrl(String(report.source_url || '').trim()),
+        image_path: null,
+        author_label: 'Laporan Masyarakat — Redaksi LAPOR BERITA',
+        status: 'published',
+        published_at: now,
+        updated_at: now
+      };
+      const inserted = await db.from('articles').insert(record).select('id').single();
+      if (inserted.error) throw inserted.error;
+      const updated = await db.from('public_reports').update({
+        status: 'approved',
+        published_article_id: inserted.data.id,
+        reviewed_at: now
+      }).eq('id', report.id);
+      if (updated.error) {
+        message('report-message', 'Berita sudah terbit, tetapi status laporan gagal diperbarui: ' + updated.error.message + '. Jangan tekan Terbitkan lagi agar tidak membuat duplikat.', true);
+      } else {
+        message('report-message', 'Berhasil diterbitkan ke publik. Judul: ' + title + '.');
+      }
+      await refreshAll();
+    } catch (error) {
+      console.error('Penerbitan laporan gagal:', error);
+      message('report-message', 'Gagal menerbitkan laporan: ' + (error.message || 'kesalahan database'), true);
     } finally {
       setActionBusy(false);
     }
@@ -775,15 +928,19 @@
       const target = event.target;
       if (!(target instanceof Element)) return;
       const edit = target.closest('[data-edit-article]');
+      const statusArticle = target.closest('[data-set-article-status]');
       const delArticle = target.closest('[data-delete-article]');
       const delReport = target.closest('[data-delete-report]');
       const view = target.closest('[data-view-report]');
       const use = target.closest('[data-use-report]');
-      if (edit) editArticle(edit.dataset.editArticle);
+      const publishReportButton = target.closest('[data-publish-report]');
+      if (statusArticle) setArticleStatus(statusArticle.dataset.articleId, statusArticle.dataset.setArticleStatus);
+      else if (edit) editArticle(edit.dataset.editArticle);
       else if (delArticle) deleteArticle(delArticle.dataset.deleteArticle);
       else if (delReport) deleteReport(delReport.dataset.deleteReport);
       else if (view) showReport(view.dataset.viewReport);
       else if (use) useReportAsDraft(use.dataset.useReport);
+      else if (publishReportButton) publishReport(publishReportButton.dataset.publishReport);
     });
   }
 
