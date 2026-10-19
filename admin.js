@@ -1,27 +1,21 @@
-
 (() => {
   'use strict';
 
   const $ = id => document.getElementById(id);
   const cfg = window.LAPOR_BERITA_CONFIG;
+  const REGION_API = 'https://www.emsifa.com/api-wilayah-indonesia/v2';
+  const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=700&q=75';
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[char]));
 
   const date = value => {
     if (!value) return '-';
     const d = new Date(value);
-    return Number.isNaN(d.getTime())
-      ? '-'
-      : d.toLocaleString('id-ID', {
-          dateStyle: 'medium',
-          timeStyle: 'short'
-        });
+    return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('id-ID', {
+      dateStyle: 'medium', timeStyle: 'short'
+    });
   };
 
   const slugify = value => String(value || '')
@@ -30,24 +24,37 @@
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 180);
+    .slice(0, 150);
 
-  const validUrl = value => {
-    if (!value) return '';
-    const url = new URL(value);
+  function validUrl(value) {
+    if (!value) return null;
+    let url;
+    try { url = new URL(value); }
+    catch (_) { throw new Error('Tautan tidak valid. Awali dengan https:// atau http://.'); }
     if (!['http:', 'https:'].includes(url.protocol)) {
       throw new Error('Tautan harus menggunakan HTTP atau HTTPS.');
     }
     return url.href;
-  };
+  }
+
+  function isMissingColumn(error) {
+    const code = String(error?.code || '');
+    const message = String(error?.message || '').toLowerCase();
+    return code === '42703' || code === 'PGRST204' ||
+      (message.includes('column') && (message.includes('does not exist') || message.includes('schema cache')));
+  }
 
   let db = null;
   let currentUser = null;
   let articles = [];
   let reports = [];
   let activeReport = null;
-  let mediaUrls = [];
-  let busy = false;
+  let actionRunning = false;
+  let refreshing = false;
+  let regionListsReady = false;
+  let mediaPreviewUrls = [];
+  let imagePreviewUrl = null;
+  let locationWarning = '';
 
   function message(id, text, isError = false) {
     const el = $(id);
@@ -66,564 +73,416 @@
     $('admin-panel')?.classList.remove('hidden');
   }
 
-  function setBusy(value) {
-    busy = value;
-
-    [
-      'save-btn',
-      'fetch-btn',
-      'refresh-btn',
-      'logout-btn'
-    ].forEach(id => {
+  function setActionBusy(value) {
+    actionRunning = value;
+    ['login-btn', 'save-btn', 'publish-btn', 'fetch-btn', 'cancel-btn', 'logout-btn'].forEach(id => {
       const el = $(id);
       if (el) el.disabled = value;
     });
+    const refresh = $('refresh-btn');
+    if (refresh) refresh.disabled = value || refreshing;
   }
 
   function checkConfig() {
     if (!cfg?.SUPABASE_URL || !cfg?.SUPABASE_PUBLISHABLE_KEY) {
-      throw new Error(
-        'Konfigurasi Supabase belum lengkap. Periksa supabase-config.js.'
-      );
+      throw new Error('Konfigurasi Supabase belum lengkap. Periksa supabase-config.js.');
     }
-
     if (!window.supabase?.createClient) {
-      throw new Error(
-        'Pustaka Supabase belum termuat. Periksa koneksi internet.'
-      );
+      throw new Error('Pustaka Supabase belum termuat. Periksa koneksi internet.');
     }
-
-    db = window.supabase.createClient(
-      cfg.SUPABASE_URL,
-      cfg.SUPABASE_PUBLISHABLE_KEY,
-      {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true
-        }
-      }
-    );
+    db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
   }
 
   async function verifyAdmin() {
-    const { data: userResult, error: userError } =
-      await db.auth.getUser();
-
-    if (userError || !userResult?.user) {
+    if (!db) throw new Error('Supabase belum tersambung.');
+    const result = await db.auth.getUser();
+    if (result.error || !result.data?.user) {
       currentUser = null;
       return false;
     }
-
-    currentUser = userResult.user;
-
-    const { data, error } = await db.rpc('is_site_admin');
-
-    if (error) {
-      console.error('Pemeriksaan hak admin gagal:', error);
-      throw new Error(
-        'Hak admin belum dapat diverifikasi. Periksa fungsi is_site_admin() dan izin Supabase.'
-      );
+    currentUser = result.data.user;
+    const adminResult = await db.rpc('is_site_admin');
+    if (adminResult.error) {
+      console.error('Pemeriksaan hak admin gagal:', adminResult.error);
+      throw new Error('Hak admin belum dapat diverifikasi. Periksa fungsi is_site_admin() dan izin Supabase.');
     }
-
-    if (data !== true) {
+    if (adminResult.data !== true) {
       await db.auth.signOut();
       currentUser = null;
-      throw new Error(
-        'Akun berhasil masuk, tetapi belum memiliki hak admin LAPOR BERITA.'
-      );
+      throw new Error('Akun ini belum diberi hak admin LAPOR BERITA.');
     }
-
     return true;
   }
 
   async function login(event) {
     event.preventDefault();
-    if (busy) return;
-
-    const email = $('email')?.value.trim();
-    const password = $('password')?.value;
-
+    if (actionRunning) return;
+    if (!db) {
+      message('login-message', 'Supabase belum siap. Muat ulang halaman dan periksa koneksi.', true);
+      return;
+    }
+    const email = $('email')?.value.trim() || '';
+    const password = $('password')?.value || '';
     if (!email || !password) {
       message('login-message', 'Email dan kata sandi wajib diisi.', true);
       return;
     }
-
-    setBusy(true);
-    message('login-message', 'Memeriksa akun admin...');
-
+    setActionBusy(true);
+    message('login-message', 'Memeriksa akun admin…');
     try {
-      const { error } = await db.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (error) throw error;
-
-      await verifyAdmin();
+      const signedIn = await db.auth.signInWithPassword({ email, password });
+      if (signedIn.error) throw signedIn.error;
+      const authorized = await verifyAdmin();
+      if (!authorized) throw new Error('Sesi login tidak ditemukan.');
       showAdmin();
-
-      if ($('session-info')) {
-        $('session-info').textContent =
-          'Login sebagai ' + (currentUser.email || 'Admin');
-      }
-
+      if ($('session-info')) $('session-info').textContent = 'Login sebagai ' + (currentUser?.email || 'Admin');
       await refreshAll();
+      message('login-message', 'Login berhasil.');
     } catch (error) {
       console.error('Login admin gagal:', error);
-      message(
-        'login-message',
-        error.message || 'Login gagal. Periksa akun dan konfigurasi.',
-        true
-      );
+      message('login-message', error.message || 'Login gagal. Periksa akun dan konfigurasi.', true);
+      showLogin();
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
   async function logout() {
-    if (!db || busy) return;
-
-    setBusy(true);
-
+    if (!db || actionRunning) return;
+    setActionBusy(true);
     try {
       const { error } = await db.auth.signOut();
       if (error) throw error;
-
       currentUser = null;
       showLogin();
       message('login-message', 'Anda telah keluar dari panel admin.');
     } catch (error) {
       message('login-message', 'Gagal keluar: ' + error.message, true);
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
+  async function getArticles() {
+    const extended = 'id,title,slug,summary,body,category_id,image_path,author_label,source_url,status,published_at,created_at,updated_at,district,village,location_manual,location_detail,region_type,province,regency,city,media_urls';
+    const first = await db.from('articles').select(extended).order('created_at', { ascending: false }).limit(200);
+    if (!first.error) return { data: first.data || [], usedFallback: false };
+    if (!isMissingColumn(first.error)) throw first.error;
+    const core = await db.from('articles')
+      .select('id,title,slug,summary,body,category_id,image_path,author_label,source_url,status,published_at,created_at,updated_at')
+      .order('created_at', { ascending: false }).limit(200);
+    if (core.error) throw core.error;
+    return { data: core.data || [], usedFallback: true };
+  }
+
+  async function getReports() {
+    const result = await db.from('public_reports')
+      .select('id,title,body,proposed_category_id,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at')
+      .order('created_at', { ascending: false }).limit(200);
+    if (result.error) throw result.error;
+    return result.data || [];
+  }
+
   async function refreshAll() {
-    if (!db || !currentUser || busy) return;
-
-    setBusy(true);
-    message('report-message', 'Memuat laporan...');
-    message('article-message', 'Memuat berita...');
-
+    if (!db || !currentUser || refreshing) return;
+    refreshing = true;
+    const refresh = $('refresh-btn');
+    if (refresh) refresh.disabled = true;
+    message('article-message', 'Memuat daftar berita…');
+    message('report-message', 'Memuat laporan masyarakat…');
     try {
       const authorized = await verifyAdmin();
-
       if (!authorized) {
         showLogin();
+        message('login-message', 'Sesi admin berakhir. Silakan login kembali.', true);
         return;
       }
-
-      const [articleResult, reportResult] = await Promise.all([
-        db.from('articles')
-          .select(
-            'id,title,slug,summary,body,category_id,image_path,author_label,source_url,status,published_at,created_at,updated_at,district,village,location_manual,location_detail'
-          )
-          .order('created_at', { ascending: false })
-          .limit(200),
-
-        db.from('public_reports')
-          .select(
-            'id,title,body,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at'
-          )
-          .order('created_at', { ascending: false })
-          .limit(200)
-      ]);
-
-      if (articleResult.error) throw articleResult.error;
-      if (reportResult.error) throw reportResult.error;
-
-      articles = articleResult.data || [];
-      reports = reportResult.data || [];
-
-      renderArticles();
-      renderReports();
-
-      message('article-message', 'Berita dimuat: ' + articles.length);
-      message('report-message', 'Laporan dimuat: ' + reports.length);
+      const results = await Promise.allSettled([getArticles(), getReports()]);
+      if (results[0].status === 'fulfilled') {
+        articles = results[0].value.data;
+        renderArticles();
+        const fallback = results[0].value.usedFallback;
+        message('article-message', 'Daftar berita berhasil dimuat: ' + articles.length + (fallback ? '. Sebagian kolom lokasi belum tersedia di database.' : '.'));
+      } else {
+        console.error('Gagal memuat berita:', results[0].reason);
+        articles = [];
+        renderArticles();
+        message('article-message', 'Gagal memuat berita: ' + (results[0].reason?.message || 'kesalahan database'), true);
+      }
+      if (results[1].status === 'fulfilled') {
+        reports = results[1].value;
+        renderReports();
+        message('report-message', 'Laporan berhasil dimuat: ' + reports.length + '.');
+      } else {
+        console.error('Gagal memuat laporan:', results[1].reason);
+        reports = [];
+        renderReports();
+        message('report-message', 'Gagal memuat laporan: ' + (results[1].reason?.message || 'kesalahan database'), true);
+      }
     } catch (error) {
-      console.error('Gagal memuat panel:', error);
-
-      message(
-        'article-message',
-        'Gagal memuat berita: ' + error.message,
-        true
-      );
-
-      message(
-        'report-message',
-        'Gagal memuat laporan: ' + error.message,
-        true
-      );
+      console.error('Pemeriksaan sesi/pemuatan panel gagal:', error);
+      message('article-message', 'Panel belum dapat dimuat: ' + error.message, true);
+      message('report-message', 'Panel belum dapat dimuat: ' + error.message, true);
     } finally {
-      setBusy(false);
+      refreshing = false;
+      if (refresh) refresh.disabled = actionRunning;
     }
   }
 
   function renderArticles() {
     const tbody = $('article-list');
     if (!tbody) return;
-
-    const published = articles.filter(
-      article => article.status === 'published'
-    ).length;
-
-    if ($('total-articles')) {
-      $('total-articles').textContent = articles.length;
-    }
-
-    if ($('published-articles')) {
-      $('published-articles').textContent = published;
-    }
-
     if (!articles.length) {
-      tbody.innerHTML =
-        '<tr><td colspan="5">Belum ada berita. Silakan buat berita baru.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5">Belum ada berita yang dapat ditampilkan.</td></tr>';
       return;
     }
-
     tbody.innerHTML = articles.map(article => {
-      const location = [
-        article.village,
-        article.district,
-        article.location_manual
-      ].filter(Boolean).join(', ');
-
-      return `
-        <tr>
-          <td>${esc(article.title)}</td>
-          <td>${esc(location || '-')}</td>
-          <td>${esc(article.status || '-')}</td>
-          <td>${esc(date(article.created_at))}</td>
-          <td>
-            <div class="toolbar">
-              <button type="button"
-                class="button secondary"
-                data-edit-article="${esc(article.id)}">
-                Edit
-              </button>
-
-              <button type="button"
-                class="button danger"
-                data-delete-article="${esc(article.id)}">
-                Hapus Permanen
-              </button>
-            </div>
-          </td>
-        </tr>
-      `;
+      const location = [article.village, article.district, article.regency, article.city, article.province, article.location_manual]
+        .filter(Boolean).filter((value, index, arr) => arr.indexOf(value) === index).join(', ');
+      const statusLabel = article.status === 'published' ? 'TERBIT / PUBLIK' : (article.status || 'draft');
+      const publicLink = article.status === 'published'
+        ? '<a class="button secondary" href="artikel.html?id=' + encodeURIComponent(article.id) + '" target="_blank" rel="noopener">Lihat Publik</a>' : '';
+      return '<tr>' +
+        '<td>' + esc(article.title || '(Tanpa judul)') + '</td>' +
+        '<td>' + esc(location || '-') + '</td>' +
+        '<td>' + esc(statusLabel) + '</td>' +
+        '<td>' + esc(date(article.created_at)) + '</td>' +
+        '<td><div class="article-actions">' +
+          '<button type="button" class="button secondary" data-edit-article="' + esc(article.id) + '">Edit</button>' +
+          publicLink +
+          '<button type="button" class="button danger" data-delete-article="' + esc(article.id) + '">Hapus Permanen</button>' +
+        '</div></td></tr>';
     }).join('');
   }
 
   function renderReports() {
     const tbody = $('report-list');
     if (!tbody) return;
-
     if (!reports.length) {
-      tbody.innerHTML =
-        '<tr><td colspan="4">Belum ada laporan masyarakat.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4">Belum ada laporan masyarakat.</td></tr>';
       return;
     }
+    tbody.innerHTML = reports.map(report =>
+      '<tr><td>' + esc(report.title || '(Tanpa judul)') + '</td>' +
+      '<td>' + esc(report.status || 'submitted') + '</td>' +
+      '<td>' + esc(date(report.created_at)) + '</td>' +
+      '<td><div class="report-actions">' +
+        '<button type="button" class="button secondary" data-view-report="' + esc(report.id) + '">Periksa</button>' +
+        '<button type="button" class="button" data-use-report="' + esc(report.id) + '">Jadikan Draf</button>' +
+        '<button type="button" class="button danger" data-delete-report="' + esc(report.id) + '">Hapus Permanen</button>' +
+      '</div></td></tr>'
+    ).join('');
+  }
 
-    tbody.innerHTML = reports.map(report => `
-      <tr>
-        <td>${esc(report.title || '(Tanpa judul)')}</td>
-        <td>${esc(report.status || 'Menunggu pemeriksaan')}</td>
-        <td>${esc(date(report.created_at))}</td>
-        <td>
-          <div class="report-actions">
-            <button type="button"
-              class="button secondary"
-              data-view-report="${esc(report.id)}">
-              Periksa
-            </button>
+  function clearMediaPreviewUrls() {
+    mediaPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+    mediaPreviewUrls = [];
+  }
 
-            <button type="button"
-              class="button"
-              data-use-report="${esc(report.id)}">
-              Jadikan draf
-            </button>
+  function clearMainImagePreviewUrl() {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    imagePreviewUrl = null;
+  }
 
-            <button type="button"
-              class="button danger"
-              data-delete-report="${esc(report.id)}">
-              Hapus Permanen
-            </button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
+  function clearLocationChildren() {
+    setOptions($('regency-select'), [], 'Pilih provinsi dahulu');
+    setOptions($('district-select'), [], 'Pilih kabupaten/kota dahulu');
+    setOptions($('village-select'), [], 'Pilih kecamatan dahulu');
   }
 
   function resetForm() {
     $('article-form')?.reset();
-
     if ($('article-id')) $('article-id').value = '';
+    if ($('source-report-id')) $('source-report-id').value = '';
     if ($('form-title')) $('form-title').textContent = 'Buat Berita';
     if ($('status')) $('status').value = 'draft';
-
-    [
-      'province-select',
-      'regency-select',
-      'district-select',
-      'village-select',
-      'region-display'
-    ].forEach(id => {
-      if ($(id)) $(id).value = '';
-    });
-
+    clearMediaPreviewUrls();
+    clearMainImagePreviewUrl();
     if ($('media-preview')) $('media-preview').replaceChildren();
-
-    mediaUrls.forEach(url => URL.revokeObjectURL(url));
-    mediaUrls = [];
-
+    if ($('image-preview')) $('image-preview').replaceChildren();
+    setOptions($('province-select'), provinceCache, 'Pilih provinsi');
+    clearLocationChildren();
+    $('regency-select').disabled = true;
+    $('district-select').disabled = true;
+    $('village-select').disabled = true;
+    updateRegionDisplay();
     message('article-message', 'Form dikosongkan.');
   }
 
-  function editArticle(id) {
-    const article = articles.find(item => item.id === id);
-    if (!article) return;
+  async function saveArticle(event, forcedStatus = null) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    if (actionRunning) return;
+    const id = $('article-id')?.value || '';
+    const title = $('title')?.value.trim() || '';
+    const summary = $('summary')?.value.trim() || '';
+    const body = $('body')?.value.trim() || '';
+    const sourceRaw = $('source')?.value.trim() || '';
+    const imageRaw = $('image')?.value.trim() || '';
+    const status = forcedStatus || $('status')?.value || 'draft';
+    const sourceReportId = $('source-report-id')?.value || '';
 
-    $('article-id').value = article.id;
-    $('title').value = article.title || '';
-    $('summary').value = article.summary || '';
-    $('body').value = article.body || '';
-    $('source').value = article.source_url || '';
-    $('image').value = article.image_path || '';
-    $('status').value = article.status || 'draft';
-
-    if ($('district-select')) {
-      $('district-select').value = article.district || '';
+    if (!title || !body) {
+      message('article-message', 'Judul dan isi berita wajib diisi sebelum menyimpan atau menerbitkan.', true);
+      return;
+    }
+    if (!['draft', 'review', 'published', 'archived'].includes(status)) {
+      message('article-message', 'Status berita tidak valid.', true);
+      return;
+    }
+    let sourceUrl, imageUrl;
+    try {
+      sourceUrl = validUrl(sourceRaw);
+      imageUrl = validUrl(imageRaw);
+    } catch (error) {
+      message('article-message', error.message, true);
+      return;
+    }
+    if (status === 'published') {
+      const proceed = confirm('Terbitkan berita ini ke publik sekarang? Pastikan isi, fakta, dan sumber sudah diperiksa.');
+      if (!proceed) return;
     }
 
-    if ($('village-select')) {
-      $('village-select').value = article.village || '';
-    }
-
-    if ($('location-manual')) {
-      $('location-manual').value = article.location_manual || '';
-    }
-
-    if ($('location-detail')) {
-      $('location-detail').value = article.location_detail || '';
-    }
-
-    if ($('form-title')) {
-      $('form-title').textContent = 'Edit Berita';
-    }
-
-    message(
-      'article-message',
-      'Berita dimuat ke formulir. Periksa sebelum menyimpan.'
-    );
-
-    $('article-form')?.scrollIntoView({ behavior: 'smooth' });
-  }
-
-  function getLocationValues() {
-    return {
-      district: $('district-select')?.value || '',
-      village: $('village-select')?.value || '',
-      location_manual: $('location-manual')?.value.trim() || '',
-      location_detail: $('location-detail')?.value.trim() || ''
-    };
-  }
-
-  async function saveArticle(event) {
-    event.preventDefault();
-    if (busy) return;
-
-    setBusy(true);
-    message('article-message', 'Menyimpan berita...');
-
+    setActionBusy(true);
+    message('article-message', status === 'published' ? 'Menerbitkan berita ke publik…' : 'Menyimpan berita…');
     try {
       const authorized = await verifyAdmin();
-      if (!authorized) throw new Error('Sesi admin tidak aktif.');
-
-      const id = $('article-id')?.value || '';
-      const title = $('title')?.value.trim() || '';
-      const summary = $('summary')?.value.trim() || '';
-      const body = $('body')?.value.trim() || '';
-      const sourceRaw = $('source')?.value.trim() || '';
-      const imageRaw = $('image')?.value.trim() || '';
-      const status = $('status')?.value || 'draft';
-
-      if (!title || !body) {
-        throw new Error('Judul dan isi berita wajib diisi.');
-      }
-
-      if (!['draft', 'review', 'published', 'archived'].includes(status)) {
-        throw new Error('Status berita tidak valid.');
-      }
-
-      const source_url = sourceRaw ? validUrl(sourceRaw) : null;
-      const image_path = imageRaw ? validUrl(imageRaw) : null;
-
+      if (!authorized) throw new Error('Sesi admin tidak aktif. Login kembali.');
       const existing = articles.find(article => article.id === id);
       const slugBase = slugify(title) || 'berita';
-      const slug = existing?.slug ||
-        (slugBase + '-' + Date.now().toString(36));
-
-      const record = {
-        title,
-        slug,
-        summary,
-        body,
-        source_url,
-        image_path,
+      const slug = existing?.slug || (slugBase + '-' + Date.now().toString(36));
+      const now = new Date().toISOString();
+      const location = getLocationValues();
+      const coreRecord = {
+        title: title,
+        slug: slug,
+        summary: summary,
+        body: body,
+        source_url: sourceUrl,
+        image_path: imageUrl,
         author_label: 'Redaksi LAPOR BERITA',
-        status,
-        ...getLocationValues(),
-        published_at: status === 'published'
-          ? (existing?.published_at || new Date().toISOString())
-          : null,
-        updated_at: new Date().toISOString()
+        status: status,
+        published_at: status === 'published' ? (existing?.published_at || now) : null,
+        updated_at: now
       };
-
-      let result;
-
-      if (id) {
-        result = await db.from('articles')
-          .update(record)
-          .eq('id', id)
-          .select('id')
-          .single();
+      const fullRecord = Object.assign({}, coreRecord, location);
+      let result = await writeArticle(id, fullRecord);
+      if (result.error && isMissingColumn(result.error)) {
+        locationWarning = 'Lokasi belum tersimpan karena kolom lokasi belum tersedia di database. Jalankan upgrade-schema.sql satu kali untuk mengaktifkannya.';
+        result = await writeArticle(id, coreRecord);
       } else {
-        result = await db.from('articles')
-          .insert(record)
-          .select('id')
-          .single();
+        locationWarning = '';
       }
-
       if (result.error) throw result.error;
-
-      resetForm();
-      message('article-message', 'Berita berhasil disimpan.');
+      const savedId = result.data?.id || id;
+      let reportWarning = '';
+      if (status === 'published' && sourceReportId && savedId) {
+        const reportUpdate = await db.from('public_reports').update({
+          status: 'approved',
+          published_article_id: savedId,
+          reviewed_at: now
+        }).eq('id', sourceReportId);
+        if (reportUpdate.error) {
+          console.error('Berita sudah terbit, tetapi status laporan gagal diperbarui:', reportUpdate.error);
+          reportWarning = ' Berita berhasil terbit, tetapi status laporan sumber belum berhasil diperbarui: ' + reportUpdate.error.message;
+        }
+      }
+      if (status === 'published') {
+        resetForm();
+      } else {
+        // Pertahankan ID artikel dan ID laporan sumber agar draf dapat langsung diterbitkan nanti.
+        if (savedId) $('article-id').value = savedId;
+        if ($('form-title')) $('form-title').textContent = 'Edit Berita';
+      }
       await refreshAll();
+      if (status === 'published') {
+        const link = savedId ? ' Tautan publik: ' + new URL('artikel.html?id=' + encodeURIComponent(savedId), locationHref()).href : '';
+        message('article-message', 'BERHASIL DITERBITKAN. Berita sekarang berstatus publik.' + link + (locationWarning ? ' ' + locationWarning : '') + reportWarning);
+      } else {
+        message('article-message', 'Berita berhasil disimpan dengan status “' + status + '”. Formulir tetap terbuka agar dapat dilanjutkan atau diterbitkan setelah diperiksa.' + (locationWarning ? ' ' + locationWarning : ''));
+      }
     } catch (error) {
-      console.error('Simpan berita gagal:', error);
-
-      message(
-        'article-message',
-        'Berita gagal disimpan: ' + error.message,
-        true
-      );
+      console.error('Simpan/terbitkan berita gagal:', error);
+      message('article-message', 'Gagal menyimpan atau menerbitkan berita: ' + (error.message || 'kesalahan database'), true);
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
+  }
+
+  function locationHref() {
+    return window.location.href.split('?')[0].replace(/admin\.html?$/i, '');
+  }
+
+  async function writeArticle(id, record) {
+    if (id) {
+      return await db.from('articles').update(record).eq('id', id).select('id').single();
+    }
+    return await db.from('articles').insert(record).select('id').single();
   }
 
   async function deleteArticle(id) {
+    if (actionRunning) return;
     const article = articles.find(item => item.id === id);
-    if (!article || busy) return;
-
-    const confirmed = confirm(
-      'HAPUS PERMANEN berita "' + article.title +
-      '"?\n\nTindakan ini tidak dapat dibatalkan.'
-    );
-
-    if (!confirmed) return;
-
-    setBusy(true);
-
+    if (!article) return;
+    if (!confirm('Hapus permanen berita “' + article.title + '”? Tindakan ini tidak dapat dibatalkan.')) return;
+    setActionBusy(true);
+    message('article-message', 'Menghapus berita…');
     try {
       const authorized = await verifyAdmin();
-      if (!authorized) throw new Error('Sesi admin tidak aktif.');
-
-      const { error } = await db.from('articles')
-        .delete()
-        .eq('id', id);
-
+      if (!authorized) throw new Error('Sesi admin tidak aktif. Login kembali.');
+      const { error } = await db.from('articles').delete().eq('id', id);
       if (error) throw error;
-
-      if ($('article-id')?.value === id) {
-        resetForm();
-      }
-
-      message('article-message', 'Berita berhasil dihapus permanen.');
+      if ($('article-id')?.value === id) resetForm();
       await refreshAll();
+      message('article-message', 'Berita berhasil dihapus permanen.');
     } catch (error) {
       console.error('Hapus berita gagal:', error);
-
-      message(
-        'article-message',
-        'Gagal menghapus berita: ' + error.message,
-        true
-      );
+      message('article-message', 'Gagal menghapus berita: ' + error.message, true);
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
   async function deleteReport(id) {
+    if (actionRunning) return;
     const report = reports.find(item => item.id === id);
-    if (!report || busy) return;
-
-    const confirmed = confirm(
-      'HAPUS PERMANEN laporan "' +
-      (report.title || '(Tanpa judul)') +
-      '"?\n\nLaporan dan data pribadi terkait di database akan dihapus. Tindakan ini tidak dapat dibatalkan.'
-    );
-
-    if (!confirmed) return;
-
-    setBusy(true);
-    message('report-message', 'Menghapus laporan secara permanen...');
-
+    if (!report) return;
+    if (!confirm('HAPUS PERMANEN laporan “' + (report.title || '(Tanpa judul)') + '”? Data laporan terkait akan dihapus. Tindakan ini tidak dapat dibatalkan.')) return;
+    setActionBusy(true);
+    message('report-message', 'Menghapus laporan secara permanen…');
     try {
       const authorized = await verifyAdmin();
-      if (!authorized) throw new Error('Sesi admin tidak aktif.');
-
-      const { data, error } = await db.rpc(
-        'admin_delete_public_report',
-        { p_report_id: id }
-      );
-
-      if (error) throw error;
-
-      if (data !== true) {
-        throw new Error('Laporan tidak ditemukan atau sudah dihapus.');
-      }
-
+      if (!authorized) throw new Error('Sesi admin tidak aktif. Login kembali.');
+      const result = await db.rpc('admin_delete_public_report', { p_report_id: id });
+      if (result.error) throw result.error;
+      if (result.data === false) throw new Error('Laporan tidak ditemukan atau tidak berhasil dihapus.');
       if (activeReport?.id === id) {
         $('report-detail-panel')?.classList.add('hidden');
         activeReport = null;
       }
-
-      message('report-message', 'Laporan berhasil dihapus permanen.');
-
       await refreshAll();
+      message('report-message', 'Laporan berhasil dihapus permanen.');
     } catch (error) {
       console.error('Hapus laporan gagal:', error);
-
-      message(
-        'report-message',
-        'Gagal menghapus laporan: ' + error.message,
-        true
-      );
+      message('report-message', 'Gagal menghapus laporan: ' + error.message, true);
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
   function showReport(id) {
     const report = reports.find(item => item.id === id);
     if (!report) return;
-
     activeReport = report;
-
     const detail = $('report-detail');
-
     if (detail) {
-      detail.textContent =
-        'Judul: ' + (report.title || '-') + '\n\n' +
+      detail.textContent = 'Judul: ' + (report.title || '-') + '\n\n' +
         'Isi laporan:\n' + (report.body || '-') + '\n\n' +
         'Sumber: ' + (report.source_url || '-') + '\n\n' +
         'Status: ' + (report.status || '-') + '\n\n' +
         'Catatan pemeriksa: ' + (report.reviewer_notes || '-');
     }
-
     $('report-detail-panel')?.classList.remove('hidden');
     $('report-detail-panel')?.scrollIntoView({ behavior: 'smooth' });
   }
@@ -631,307 +490,326 @@
   function useReportAsDraft(id) {
     const report = reports.find(item => item.id === id);
     if (!report) return;
-
     resetForm();
-
     $('title').value = report.title || '';
     $('body').value = report.body || '';
     $('source').value = report.source_url || '';
     $('status').value = 'draft';
-
-    message(
-      'article-message',
-      'Laporan dimasukkan sebagai draf. Periksa fakta dan sunting sebelum menerbitkan.'
-    );
-
+    $('source-report-id').value = report.id;
+    if ($('form-title')) $('form-title').textContent = 'Periksa Laporan — Simpan sebagai Draf';
+    message('article-message', 'Laporan dimasukkan sebagai draf. Verifikasi fakta dan sunting terlebih dahulu. Tombol “Terbitkan ke Publik” akan menerbitkan berita dan mencoba menandai laporan sebagai disetujui.');
     $('article-form')?.scrollIntoView({ behavior: 'smooth' });
   }
 
   async function fetchMetadata() {
-    const raw = $('source')?.value.trim();
-
+    if (actionRunning) return;
+    const raw = $('source')?.value.trim() || '';
     if (!raw) {
-      message(
-        'article-message',
-        'Masukkan tautan sumber terlebih dahulu.',
-        true
-      );
+      message('article-message', 'Masukkan tautan sumber terlebih dahulu.', true);
       return;
     }
-
     let url;
-
+    try { url = validUrl(raw); }
+    catch (error) { message('article-message', error.message, true); return; }
+    setActionBusy(true);
+    message('article-message', 'Mencoba mengambil judul dan ringkasan dari tautan…');
     try {
-      url = validUrl(raw);
-    } catch (error) {
-      message('article-message', error.message, true);
-      return;
-    }
-
-    if (busy) return;
-
-    setBusy(true);
-    message(
-      'article-message',
-      'Mencoba mengambil judul dan ringkasan dari tautan...'
-    );
-
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'omit',
-        redirect: 'follow'
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          'Situs sumber menolak permintaan (' + response.status + ').'
-        );
-      }
-
+      const response = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', redirect: 'follow' });
+      if (!response.ok) throw new Error('Situs sumber menolak permintaan (' + response.status + ').');
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
-
-      const meta = selector =>
-        doc.querySelector(selector)?.getAttribute('content')?.trim() || '';
-
-      const title =
-        meta('meta[property="og:title"]') ||
-        meta('meta[name="twitter:title"]') ||
-        doc.querySelector('title')?.textContent?.trim() || '';
-
-      const summary =
-        meta('meta[property="og:description"]') ||
-        meta('meta[name="description"]') ||
-        meta('meta[name="twitter:description"]') || '';
-
-      const image =
-        meta('meta[property="og:image"]') ||
-        meta('meta[name="twitter:image"]') || '';
-
-      if (title && !$('title').value.trim()) {
-        $('title').value = title;
-      }
-
-      if (summary && !$('summary').value.trim()) {
-        $('summary').value = summary;
-      }
-
+      const meta = selector => doc.querySelector(selector)?.getAttribute('content')?.trim() || '';
+      const title = meta('meta[property="og:title"]') || meta('meta[name="twitter:title"]') || doc.querySelector('title')?.textContent?.trim() || '';
+      const summary = meta('meta[property="og:description"]') || meta('meta[name="description"]') || meta('meta[name="twitter:description"]') || '';
+      const image = meta('meta[property="og:image"]') || meta('meta[name="twitter:image"]') || '';
+      if (title && !$('title').value.trim()) $('title').value = title;
+      if (summary && !$('summary').value.trim()) $('summary').value = summary;
       if (image && !$('image').value.trim()) {
-        try {
-          $('image').value = new URL(image, url).href;
-        } catch (_) {
-          // Abaikan URL gambar yang tidak valid.
-        }
+        try { $('image').value = new URL(image, url).href; } catch (_) { /* URL foto tidak valid */ }
       }
-
-      message(
-        'article-message',
-        title
-          ? 'Metadata berhasil diambil. Periksa dan lengkapi isi berita secara manual.'
-          : 'Judul tidak ditemukan. Silakan isi berita secara manual.'
-      );
+      message('article-message', title ? 'Metadata berhasil diambil. Periksa dan tulis isi berita secara layak sebelum diterbitkan.' : 'Judul tidak ditemukan. Silakan isi berita secara manual.');
     } catch (error) {
-      console.warn('Metadata tidak dapat diambil:', error);
-
-      message(
-        'article-message',
-        'Tautan tidak dapat diambil otomatis karena pembatasan situs sumber. Isi judul, ringkasan, isi, dan foto secara manual.'
-      );
+      console.warn('Metadata tidak dapat diambil otomatis:', error);
+      message('article-message', 'Situs sumber menolak pengambilan otomatis atau membatasi akses. Isi judul, ringkasan, isi berita, dan URL foto secara manual.');
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
   function previewMedia() {
+    clearMediaPreviewUrls();
     const input = $('media-files');
     const preview = $('media-preview');
-
     if (!input || !preview) return;
-
-    mediaUrls.forEach(url => URL.revokeObjectURL(url));
-    mediaUrls = [];
     preview.replaceChildren();
-
-    const files = Array.from(input.files || []).slice(0, 10);
-
-    files.forEach(file => {
-      if (
-        !file.type.startsWith('image/') &&
-        !file.type.startsWith('video/')
-      ) return;
-
+    Array.from(input.files || []).slice(0, 10).forEach(file => {
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) return;
       const url = URL.createObjectURL(file);
-      mediaUrls.push(url);
-
+      mediaPreviewUrls.push(url);
       const item = document.createElement('div');
       item.style.margin = '8px 0';
-
       if (file.type.startsWith('image/')) {
         const img = document.createElement('img');
-        img.src = url;
-        img.alt = file.name;
-        img.style.maxWidth = '140px';
-        img.style.maxHeight = '110px';
+        img.src = url; img.alt = file.name; img.style.maxWidth = '140px'; img.style.maxHeight = '110px';
         item.appendChild(img);
       } else {
         const video = document.createElement('video');
-        video.src = url;
-        video.controls = true;
-        video.style.maxWidth = '220px';
+        video.src = url; video.controls = true; video.style.maxWidth = '220px';
         item.appendChild(video);
       }
-
       const label = document.createElement('div');
-      label.textContent =
-        file.name + ' — pratinjau lokal, belum diunggah';
-
-      item.appendChild(label);
-      preview.appendChild(item);
+      label.textContent = file.name + ' — pratinjau lokal, belum diunggah';
+      item.appendChild(label); preview.appendChild(item);
     });
+    if ((input.files || []).length > 10) message('article-message', 'Hanya 10 berkas pertama yang ditampilkan. Berkas belum disimpan ke server.');
+  }
 
-    if ((input.files || []).length > 10) {
-      message(
-        'article-message',
-        'Hanya 10 berkas pertama yang ditampilkan.'
-      );
+  function previewMainImage() {
+    clearMainImagePreviewUrl();
+    const preview = $('image-preview');
+    const file = $('image-file')?.files?.[0];
+    if (preview) preview.replaceChildren();
+    if (!file || !preview) return;
+    if (!file.type.startsWith('image/')) {
+      message('article-message', 'Pilih berkas gambar. Untuk penerbitan, gunakan URL foto karena unggahan langsung belum tersambung ke Storage.');
+      return;
     }
+    imagePreviewUrl = URL.createObjectURL(file);
+    const img = document.createElement('img');
+    img.src = imagePreviewUrl; img.alt = 'Pratinjau foto pilihan';
+    preview.appendChild(img);
+    message('article-message', 'Foto berhasil dipilih untuk pratinjau. Foto ini belum tersimpan; masukkan URL foto pada kolom Foto utama.');
+  }
+
+  let provinceCache = [];
+  function setOptions(select, items, placeholder) {
+    if (!select) return;
+    const html = ['<option value="">' + esc(placeholder) + '</option>'];
+    (items || []).forEach(item => {
+      html.push('<option value="' + esc(item.id) + '">' + esc(item.name) + '</option>');
+    });
+    select.innerHTML = html.join('');
+  }
+
+  async function loadRegionList(path) {
+    const response = await fetch(REGION_API + path, { cache: 'force-cache' });
+    if (!response.ok) throw new Error('Layanan daftar wilayah menjawab ' + response.status + '.');
+    const json = await response.json();
+    const rows = Array.isArray(json) ? json : (Array.isArray(json.data) ? json.data : []);
+    return rows.map(row => ({ id: String(row.id), name: String(row.name || row.nama || '') })).filter(row => row.id && row.name);
+  }
+
+  async function loadProvinces() {
+    const select = $('province-select');
+    if (!select) return [];
+    if (regionListsReady && provinceCache.length) return provinceCache;
+    select.disabled = true;
+    setOptions(select, [], 'Memuat provinsi…');
+    try {
+      provinceCache = await loadRegionList('/provinces.json');
+      setOptions(select, provinceCache, 'Pilih provinsi');
+      regionListsReady = true;
+      select.disabled = false;
+      return provinceCache;
+    } catch (error) {
+      console.warn('Daftar provinsi tidak tersedia:', error);
+      setOptions(select, [], 'Daftar tidak tersedia — isi lokasi manual');
+      select.disabled = true;
+      message('article-message', 'Daftar wilayah tidak berhasil dimuat. Lokasi manual tetap dapat digunakan.');
+      return [];
+    }
+  }
+
+  async function loadChildren(kind, parentId) {
+    if (!parentId) return [];
+    const paths = {
+      regency: '/regencies/' + encodeURIComponent(parentId) + '.json',
+      district: '/districts/' + encodeURIComponent(parentId) + '.json',
+      village: '/villages/' + encodeURIComponent(parentId) + '.json'
+    };
+    if (!paths[kind]) return [];
+    return await loadRegionList(paths[kind]);
+  }
+
+  async function handleProvinceChange() {
+    clearLocationChildren();
+    const selected = $('province-select')?.value || '';
+    $('regency-select').disabled = true; $('district-select').disabled = true; $('village-select').disabled = true;
+    if (selected) {
+      try {
+        const rows = await loadChildren('regency', selected);
+        setOptions($('regency-select'), rows, 'Pilih kabupaten/kota');
+        $('regency-select').disabled = false;
+      } catch (error) {
+        setOptions($('regency-select'), [], 'Daftar gagal dimuat — isi lokasi manual');
+        message('article-message', 'Kabupaten/kota gagal dimuat. Silakan gunakan lokasi manual.');
+      }
+    }
+    updateRegionDisplay();
+  }
+
+  async function handleRegencyChange() {
+    setOptions($('district-select'), [], 'Memuat kecamatan…');
+    setOptions($('village-select'), [], 'Pilih kecamatan dahulu');
+    $('district-select').disabled = true; $('village-select').disabled = true;
+    const selected = $('regency-select')?.value || '';
+    if (selected) {
+      try {
+        const rows = await loadChildren('district', selected);
+        setOptions($('district-select'), rows, 'Pilih kecamatan');
+        $('district-select').disabled = false;
+      } catch (error) {
+        setOptions($('district-select'), [], 'Daftar gagal dimuat — isi lokasi manual');
+      }
+    }
+    updateRegionDisplay();
+  }
+
+  async function handleDistrictChange() {
+    setOptions($('village-select'), [], 'Memuat kelurahan/desa…');
+    $('village-select').disabled = true;
+    const selected = $('district-select')?.value || '';
+    if (selected) {
+      try {
+        const rows = await loadChildren('village', selected);
+        setOptions($('village-select'), rows, 'Pilih kelurahan/desa');
+        $('village-select').disabled = false;
+      } catch (error) {
+        setOptions($('village-select'), [], 'Daftar gagal dimuat — isi lokasi manual');
+      }
+    }
+    updateRegionDisplay();
+  }
+
+  function selectedName(id) {
+    const select = $(id);
+    if (!select || !select.value) return '';
+    return select.selectedOptions?.[0]?.textContent?.trim() || '';
+  }
+
+  function getLocationValues() {
+    const regency = selectedName('regency-select');
+    const regionType = $('region-type')?.value || 'nasional';
+    return {
+      region_type: regionType,
+      province: selectedName('province-select'),
+      regency: regency,
+      city: regionType === 'kota' ? regency : '',
+      district: selectedName('district-select'),
+      village: selectedName('village-select'),
+      location_manual: $('location-manual')?.value.trim() || '',
+      location_detail: $('location-detail')?.value.trim() || ''
+    };
   }
 
   function updateRegionDisplay() {
     const values = [
-      $('province-select')?.selectedOptions?.[0]?.textContent,
-      $('regency-select')?.selectedOptions?.[0]?.textContent,
-      $('district-select')?.selectedOptions?.[0]?.textContent,
-      $('village-select')?.selectedOptions?.[0]?.textContent,
-      $('location-manual')?.value.trim(),
-      $('location-detail')?.value.trim()
-    ].filter(value => value && !/^(Pilih|Memuat)/i.test(value));
-
-    if ($('region-display')) {
-      $('region-display').value = [...new Set(values)].join(', ');
-    }
+      selectedName('province-select'), selectedName('regency-select'), selectedName('district-select'),
+      selectedName('village-select'), $('location-manual')?.value.trim(), $('location-detail')?.value.trim()
+    ].filter(Boolean);
+    if ($('region-display')) $('region-display').value = [...new Set(values)].join(', ');
   }
 
-  function setupLocationNotice() {
-    const province = $('province-select');
-    const regency = $('regency-select');
-    const district = $('district-select');
-    const village = $('village-select');
+  function findOptionByName(select, name) {
+    if (!select || !name) return false;
+    const option = Array.from(select.options).find(item => item.value && item.textContent.trim().toLocaleLowerCase('id') === String(name).trim().toLocaleLowerCase('id'));
+    if (!option) return false;
+    select.value = option.value;
+    return true;
+  }
 
-    if (province && province.options.length <= 1) {
-      province.innerHTML =
-        '<option value="">Gunakan lokasi manual</option>';
-    }
+  async function restoreLocation(article) {
+    const provinces = await loadProvinces();
+    if (!provinces.length) return;
+    if (article.region_type && $('region-type')) $('region-type').value = article.region_type;
+    if (!findOptionByName($('province-select'), article.province)) { updateRegionDisplay(); return; }
+    await handleProvinceChange();
+    if (findOptionByName($('regency-select'), article.regency || article.city)) await handleRegencyChange();
+    if (findOptionByName($('district-select'), article.district)) await handleDistrictChange();
+    findOptionByName($('village-select'), article.village);
+    updateRegionDisplay();
+  }
 
-    if (regency) {
-      regency.innerHTML =
-        '<option value="">Gunakan lokasi manual</option>';
-      regency.disabled = true;
-    }
-
-    if (district && district.options.length <= 1) {
-      district.innerHTML =
-        '<option value="">Isi lokasi manual bila perlu</option>';
-      district.disabled = false;
-    }
-
-    if (village && village.options.length <= 1) {
-      village.innerHTML =
-        '<option value="">Isi lokasi manual bila perlu</option>';
-      village.disabled = false;
-    }
-
-    [
-      'province-select',
-      'regency-select',
-      'district-select',
-      'village-select',
-      'location-manual',
-      'location-detail'
-    ].forEach(id => {
-      $(id)?.addEventListener('change', updateRegionDisplay);
-      $(id)?.addEventListener('input', updateRegionDisplay);
-    });
+  async function editArticle(id) {
+    const article = articles.find(item => item.id === id);
+    if (!article) return;
+    resetForm();
+    $('article-id').value = article.id;
+    $('title').value = article.title || '';
+    $('summary').value = article.summary || '';
+    $('body').value = article.body || '';
+    $('source').value = article.source_url || '';
+    $('image').value = article.image_path || '';
+    $('status').value = article.status || 'draft';
+    $('location-manual').value = article.location_manual || '';
+    $('location-detail').value = article.location_detail || '';
+    if ($('form-title')) $('form-title').textContent = 'Edit Berita';
+    try { await restoreLocation(article); } catch (error) { console.warn('Lokasi lama tidak dapat dipulihkan:', error); }
+    updateRegionDisplay();
+    message('article-message', 'Berita dimuat ke formulir. Periksa kembali isinya, lalu simpan atau terbitkan.');
+    $('article-form')?.scrollIntoView({ behavior: 'smooth' });
   }
 
   function setupEvents() {
     $('login-form')?.addEventListener('submit', login);
     $('logout-btn')?.addEventListener('click', logout);
     $('refresh-btn')?.addEventListener('click', refreshAll);
-    $('article-form')?.addEventListener('submit', saveArticle);
+    $('article-form')?.addEventListener('submit', event => saveArticle(event));
+    $('publish-btn')?.addEventListener('click', () => saveArticle(null, 'published'));
     $('fetch-btn')?.addEventListener('click', fetchMetadata);
     $('cancel-btn')?.addEventListener('click', resetForm);
     $('media-files')?.addEventListener('change', previewMedia);
-
+    $('image-file')?.addEventListener('change', previewMainImage);
+    $('province-select')?.addEventListener('change', handleProvinceChange);
+    $('regency-select')?.addEventListener('change', handleRegencyChange);
+    $('district-select')?.addEventListener('change', handleDistrictChange);
+    ['village-select', 'region-type', 'location-manual', 'location-detail'].forEach(id => {
+      $(id)?.addEventListener('change', updateRegionDisplay);
+      $(id)?.addEventListener('input', updateRegionDisplay);
+    });
     $('close-report-btn')?.addEventListener('click', () => {
       $('report-detail-panel')?.classList.add('hidden');
       activeReport = null;
     });
-
     document.addEventListener('click', event => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-
       const edit = target.closest('[data-edit-article]');
-      const removeArticle = target.closest('[data-delete-article]');
-      const removeReport = target.closest('[data-delete-report]');
+      const delArticle = target.closest('[data-delete-article]');
+      const delReport = target.closest('[data-delete-report]');
       const view = target.closest('[data-view-report]');
       const use = target.closest('[data-use-report]');
-
-      if (edit) {
-        editArticle(edit.dataset.editArticle);
-      } else if (removeArticle) {
-        deleteArticle(removeArticle.dataset.deleteArticle);
-      } else if (removeReport) {
-        deleteReport(removeReport.dataset.deleteReport);
-      } else if (view) {
-        showReport(view.dataset.viewReport);
-      } else if (use) {
-        useReportAsDraft(use.dataset.useReport);
-      }
+      if (edit) editArticle(edit.dataset.editArticle);
+      else if (delArticle) deleteArticle(delArticle.dataset.deleteArticle);
+      else if (delReport) deleteReport(delReport.dataset.deleteReport);
+      else if (view) showReport(view.dataset.viewReport);
+      else if (use) useReportAsDraft(use.dataset.useReport);
     });
   }
 
   async function init() {
     setupEvents();
-    setupLocationNotice();
-
+    loadProvinces();
     try {
       checkConfig();
-      message('login-message', 'Memeriksa sesi admin...');
-
-      const { data, error } = await db.auth.getSession();
-      if (error) throw error;
-
-      if (data?.session) {
+      message('login-message', 'Memeriksa sesi admin…');
+      const sessionResult = await db.auth.getSession();
+      if (sessionResult.error) throw sessionResult.error;
+      if (sessionResult.data?.session) {
         const authorized = await verifyAdmin();
-
         if (authorized) {
           showAdmin();
-
-          if ($('session-info')) {
-            $('session-info').textContent =
-              'Login sebagai ' + (currentUser?.email || 'Admin');
-          }
-
+          if ($('session-info')) $('session-info').textContent = 'Login sebagai ' + (currentUser?.email || 'Admin');
           await refreshAll();
           return;
         }
       }
-
       showLogin();
       message('login-message', 'Silakan login menggunakan akun admin.');
     } catch (error) {
       console.error('Inisialisasi admin gagal:', error);
       showLogin();
-
-      message(
-        'login-message',
-        'Panel belum siap: ' + error.message,
-        true
-      );
+      message('login-message', 'Panel belum siap: ' + error.message, true);
     }
   }
 
