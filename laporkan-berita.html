@@ -87,8 +87,8 @@
 
    <div class="field">
     <label for="evidence">Foto atau video pendukung (opsional)</label>
-    <input id="evidence" type="file" accept="image/*,video/mp4,video/webm">
-    <small class="muted">Berkas akan dikirim hanya setelah penyimpanan aman di server diaktifkan.</small>
+    <input id="evidence" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm">
+    <small class="muted">Format: JPG, PNG, WEBP, MP4, atau WEBM. Maksimal 20 MB. Bukti disimpan secara privat untuk diperiksa admin.</small>
    </div>
 
    <div class="field">
@@ -112,72 +112,88 @@
 (function(){
  'use strict';
 
- const form=document.getElementById('report-form');
- const status=document.getElementById('report-status');
- const button=document.getElementById('submit-button');
+ const form = document.getElementById('report-form');
+ const statusBox = document.getElementById('report-status');
+ const button = document.getElementById('submit-button');
+ const evidenceInput = document.getElementById('evidence');
+ const MAX_FILE_SIZE = 20 * 1024 * 1024;
+ const allowedTypes = ['image/jpeg','image/png','image/webp','video/mp4','video/webm'];
 
- form.addEventListener('submit',async function(event){
+ form.addEventListener('submit', async function(event){
   event.preventDefault();
 
-  if(!document.getElementById('consent').checked){
-   status.textContent='Silakan setujui pernyataan sebelum mengirim.';
+  if (!document.getElementById('consent').checked) {
+   statusBox.textContent = 'Silakan setujui pernyataan sebelum mengirim.';
    return;
   }
 
-  const cfg=window.LAPOR_BERITA_CONFIG;
-  if(!cfg||!window.supabase){
-   status.textContent='Konfigurasi layanan belum tersedia.';
+  const cfg = window.LAPOR_BERITA_CONFIG;
+  if (!cfg || !cfg.SUPABASE_URL || !cfg.SUPABASE_PUBLISHABLE_KEY || !window.supabase) {
+   statusBox.textContent = 'Konfigurasi layanan belum tersedia.';
    return;
   }
 
-  const file=document.getElementById('evidence').files[0];
-
-  if(file && file.size>20*1024*1024){
-   status.textContent='Ukuran berkas maksimal 20 MB.';
+  const file = evidenceInput.files && evidenceInput.files[0] ? evidenceInput.files[0] : null;
+  if (file && file.size > MAX_FILE_SIZE) {
+   statusBox.textContent = 'Ukuran berkas maksimal 20 MB.';
+   return;
+  }
+  if (file && !allowedTypes.includes(file.type)) {
+   statusBox.textContent = 'Format berkas harus JPG, PNG, WEBP, MP4, atau WEBM.';
    return;
   }
 
-  const payload={
-   reporter_name:document.getElementById('reporter-name').value.trim(),
-   reporter_contact:document.getElementById('reporter-email').value.trim(),
-   title:document.getElementById('title').value.trim(),
-   category:document.getElementById('category').value,
-   location:document.getElementById('region').value.trim(),
-   body:document.getElementById('body').value.trim(),
-   source_url:document.getElementById('source').value.trim(),
-   consent:true
+  const payload = {
+   reporter_name: document.getElementById('reporter-name').value.trim(),
+   reporter_contact: document.getElementById('reporter-email').value.trim(),
+   title: document.getElementById('title').value.trim(),
+   category: document.getElementById('category').value,
+   location: document.getElementById('region').value.trim(),
+   body: document.getElementById('body').value.trim(),
+   source_url: document.getElementById('source').value.trim(),
+   consent: 'true'
   };
 
-  if(!payload.reporter_name||!payload.title||!payload.body){
-   status.textContent='Lengkapi nama, judul, dan isi berita.';
+  if (!payload.reporter_name || !payload.title || !payload.body) {
+   statusBox.textContent = 'Lengkapi nama, judul, dan isi berita.';
    return;
   }
 
-  button.disabled=true;
-  status.textContent='Mengirim laporan...';
+  button.disabled = true;
+  statusBox.textContent = file ? 'Mengirim laporan dan mengunggah berkas…' : 'Mengirim laporan…';
 
-  try{
-   const db=window.supabase.createClient(
-    cfg.SUPABASE_URL,
-    cfg.SUPABASE_PUBLISHABLE_KEY
-   );
+  try {
+   const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY);
+   const formData = new FormData();
+   Object.entries(payload).forEach(([key, value]) => formData.append(key, value));
+   if (file) formData.append('evidence', file, file.name);
 
-   const {data,error}=await db.functions.invoke(
-    'kirim-laporan-berita',
-    {body:payload}
-   );
+   const { data, error } = await db.functions.invoke('kirim-laporan-berita', {
+    body: formData
+   });
 
-   if(error)throw error;
-   if(!data||data.success!==true){
-    throw new Error(data&&data.message?data.message:'Laporan belum dapat diproses.');
+   if (error) {
+    let serverMessage = '';
+    try {
+     if (error.context && typeof error.context.json === 'function') {
+      const details = await error.context.json();
+      serverMessage = details && details.message ? details.message : '';
+     }
+    } catch (_) {}
+    throw new Error(serverMessage || 'Server gagal memproses laporan. Periksa fungsi Supabase.');
+   }
+
+   if (!data || data.success !== true) {
+    throw new Error(data && data.message ? data.message : 'Laporan belum dapat diproses.');
    }
 
    form.reset();
-   status.textContent='Laporan berhasil dikirim. Simpan nomor laporan: '+(data.report_id||'menunggu konfirmasi admin')+'.';
-  }catch(error){
-   status.textContent='Pengiriman belum aktif. Fungsi server Supabase kirim-laporan-berita perlu disiapkan terlebih dahulu.';
-  }finally{
-   button.disabled=false;
+   statusBox.textContent = 'Laporan berhasil dikirim untuk diperiksa. Nomor laporan: ' + (data.report_id || 'tersimpan') + '.';
+  } catch (error) {
+   console.error('Gagal mengirim laporan:', error);
+   statusBox.textContent = error && error.message ? error.message : 'Pengiriman gagal. Silakan coba lagi.';
+  } finally {
+   button.disabled = false;
   }
  });
 })();
