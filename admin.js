@@ -4,6 +4,8 @@
   const $ = id => document.getElementById(id);
   const cfg = window.LAPOR_BERITA_CONFIG;
   const REGION_API = 'https://www.emsifa.com/api-wilayah-indonesia/v2';
+  // Bucket publik khusus media berita. Bucket laporan-bukti tetap privat.
+  const NEWS_MEDIA_BUCKET = 'berita-media';
   const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=700&q=75';
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -327,6 +329,86 @@
     message('article-message', 'Form dikosongkan.');
   }
 
+  function parseMediaUrls(value) {
+    if (Array.isArray(value)) return value.filter(item => typeof item === 'string' && item.trim());
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.filter(item => typeof item === 'string' && item.trim());
+      } catch (_) {
+        // Support old rows where a single URL was stored as text.
+        if (/^https?:\/\//i.test(value.trim())) return [value.trim()];
+      }
+    }
+    return [];
+  }
+
+  function renderSavedMedia(urls) {
+    const preview = $('media-preview');
+    if (!preview) return;
+    preview.replaceChildren();
+    urls.forEach((url, index) => {
+      let safeUrl;
+      try { safeUrl = validUrl(url); } catch (_) { return; }
+      const item = document.createElement('div');
+      item.style.margin = '8px 0';
+      if (/\.(mp4|webm)(?:[?#]|$)/i.test(safeUrl)) {
+        const video = document.createElement('video');
+        video.src = safeUrl; video.controls = true; video.preload = 'metadata';
+        video.style.maxWidth = '220px'; video.style.maxHeight = '180px';
+        item.appendChild(video);
+      } else {
+        const img = document.createElement('img');
+        img.src = safeUrl; img.alt = 'Media berita tersimpan ' + (index + 1);
+        img.style.maxWidth = '220px'; img.style.maxHeight = '180px';
+        item.appendChild(img);
+      }
+      const link = document.createElement('a');
+      link.href = safeUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.textContent = 'Buka media tersimpan ' + (index + 1);
+      item.appendChild(link); preview.appendChild(item);
+    });
+    if (urls.length) {
+      const note = document.createElement('p');
+      note.className = 'muted';
+      note.textContent = 'Media tersimpan: ' + urls.length + '. Berkas baru yang dipilih akan ditambahkan saat berita disimpan.';
+      preview.appendChild(note);
+    }
+  }
+
+  async function uploadSelectedMedia(articleId, existingUrls) {
+    const input = $('media-files');
+    const files = Array.from(input?.files || []).slice(0, 10);
+    if (!files.length) return existingUrls;
+    const accepted = files.filter(file =>
+      file.type.startsWith('image/') || ['video/mp4', 'video/webm'].includes(file.type)
+    );
+    if (accepted.length !== files.length) throw new Error('Gunakan foto atau video MP4/WEBM saja.');
+    for (const file of accepted) {
+      if (file.size > 20 * 1024 * 1024) throw new Error('Ukuran setiap berkas maksimal 20 MB: ' + file.name);
+    }
+    const uploadedUrls = [];
+    for (const file of accepted) {
+      const cleanName = file.name.normalize('NFKD').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-90) || 'media';
+      const path = (articleId || 'draft-' + Date.now()) + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 9) + '-' + cleanName;
+      const upload = await db.storage.from(NEWS_MEDIA_BUCKET).upload(path, file, {
+        cacheControl: '3600', upsert: false, contentType: file.type || undefined
+      });
+      if (upload.error) {
+        const msg = upload.error.message || 'unggahan gagal';
+        if (/bucket not found/i.test(msg)) {
+          throw new Error('Bucket Storage "' + NEWS_MEDIA_BUCKET + '" belum ada. Buat bucket bernama berita-media dan set Public, lalu coba simpan lagi.');
+        }
+        throw new Error('Gagal mengunggah ' + file.name + ': ' + msg + '. Periksa izin Storage untuk akun admin.');
+      }
+      const publicResult = db.storage.from(NEWS_MEDIA_BUCKET).getPublicUrl(path);
+      const publicUrl = publicResult?.data?.publicUrl;
+      if (!publicUrl) throw new Error('Berkas terunggah, tetapi URL publik tidak berhasil dibuat. Periksa pengaturan bucket.');
+      uploadedUrls.push(publicUrl);
+    }
+    return existingUrls.concat(uploadedUrls);
+  }
+
   async function saveArticle(event, forcedStatus = null) {
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
     if (actionRunning) return;
@@ -370,6 +452,9 @@
       const slug = existing?.slug || (slugBase + '-' + Date.now().toString(36));
       const now = new Date().toISOString();
       const location = getLocationValues();
+      const oldMediaUrls = parseMediaUrls(existing?.media_urls);
+      message('article-message', 'Mengunggah foto/video tambahan dan menyimpan berita…');
+      const mediaUrls = await uploadSelectedMedia(id || slug, oldMediaUrls);
       const coreRecord = {
         title: title,
         slug: slug,
@@ -377,6 +462,7 @@
         body: body,
         source_url: sourceUrl,
         image_path: imageUrl,
+        media_urls: mediaUrls,
         author_label: 'Redaksi LAPOR BERITA',
         status: status,
         published_at: status === 'published' ? (existing?.published_at || now) : null,
@@ -385,13 +471,22 @@
       const fullRecord = Object.assign({}, coreRecord, location);
       let result = await writeArticle(id, fullRecord);
       if (result.error && isMissingColumn(result.error)) {
+        const errorText = String(result.error.message || '').toLowerCase();
+        if (errorText.includes('media_urls')) {
+          throw new Error('Kolom media_urls belum tersedia di tabel articles. Media sudah mungkin terunggah, tetapi daftar medianya belum bisa disimpan ke database. Tambahkan kolom media_urls (tipe jsonb) sebelum mencoba lagi.');
+        }
         locationWarning = 'Lokasi belum tersimpan karena kolom lokasi belum tersedia di database. Jalankan upgrade-schema.sql satu kali untuk mengaktifkannya.';
-        result = await writeArticle(id, coreRecord);
+        const { media_urls, ...recordWithoutMedia } = coreRecord;
+        result = await writeArticle(id, Object.assign({}, recordWithoutMedia, location));
+        if (result.error && isMissingColumn(result.error)) result = await writeArticle(id, recordWithoutMedia);
       } else {
         locationWarning = '';
       }
       if (result.error) throw result.error;
       const savedId = result.data?.id || id;
+      if ($('media-files')) $('media-files').value = '';
+      clearMediaPreviewUrls();
+      renderSavedMedia(mediaUrls);
       let reportWarning = '';
       if (status === 'published' && sourceReportId && savedId) {
         const reportUpdate = await db.from('public_reports').update({
@@ -788,10 +883,10 @@
         item.appendChild(video);
       }
       const label = document.createElement('div');
-      label.textContent = file.name + ' — pratinjau lokal, belum diunggah';
+      label.textContent = file.name + ' — siap diunggah saat berita disimpan';
       item.appendChild(label); preview.appendChild(item);
     });
-    if ((input.files || []).length > 10) message('article-message', 'Hanya 10 berkas pertama yang ditampilkan. Berkas belum disimpan ke server.');
+    if ((input.files || []).length > 10) message('article-message', 'Maksimal 10 berkas pertama yang akan diproses saat berita disimpan.');
   }
 
   function previewMainImage() {
@@ -972,6 +1067,7 @@
     $('body').value = article.body || '';
     $('source').value = article.source_url || '';
     $('image').value = article.image_path || '';
+    renderSavedMedia(parseMediaUrls(article.media_urls));
     $('status').value = article.status || 'draft';
     if ($('location-manual')) $('location-manual').value = article.location_manual || '';
     if ($('location-detail')) $('location-detail').value = article.location_detail || '';
