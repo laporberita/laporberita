@@ -55,6 +55,7 @@
   let mediaPreviewUrls = [];
   let imagePreviewUrl = null;
   let locationWarning = '';
+  let provinceCache = [];
 
   function message(id, text, isError = false) {
     const el = $(id);
@@ -178,11 +179,22 @@
   }
 
   async function getReports() {
+    const columns = 'id,title,body,proposed_category_id,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at,evidence_path';
     const result = await db.from('public_reports')
-      .select('id,title,body,proposed_category_id,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at')
+      .select(columns)
       .order('created_at', { ascending: false }).limit(200);
-    if (result.error) throw result.error;
-    return result.data || [];
+    if (!result.error) return result.data || [];
+
+    // Backward compatibility: if evidence_path has not reached the database schema cache,
+    // load the original columns so the rest of the admin panel remains usable.
+    if (isMissingColumn(result.error)) {
+      const fallback = await db.from('public_reports')
+        .select('id,title,body,proposed_category_id,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at')
+        .order('created_at', { ascending: false }).limit(200);
+      if (fallback.error) throw fallback.error;
+      return fallback.data || [];
+    }
+    throw result.error;
   }
 
   async function refreshAll() {
@@ -308,9 +320,9 @@
     if ($('image-preview')) $('image-preview').replaceChildren();
     setOptions($('province-select'), provinceCache, 'Pilih provinsi');
     clearLocationChildren();
-    $('regency-select').disabled = true;
-    $('district-select').disabled = true;
-    $('village-select').disabled = true;
+    if ($('regency-select')) $('regency-select').disabled = true;
+    if ($('district-select')) $('district-select').disabled = true;
+    if ($('village-select')) $('village-select').disabled = true;
     updateRegionDisplay();
     message('article-message', 'Form dikosongkan.');
   }
@@ -395,7 +407,6 @@
       if (status === 'published') {
         resetForm();
       } else {
-        // Pertahankan ID artikel dan ID laporan sumber agar draf dapat langsung diterbitkan nanti.
         if (savedId) $('article-id').value = savedId;
         if ($('form-title')) $('form-title').textContent = 'Edit Berita';
       }
@@ -435,6 +446,8 @@
     setActionBusy(true);
     message('article-message', 'Memperbarui status berita…');
     try {
+      const authorized = await verifyAdmin();
+      if (!authorized) throw new Error('Sesi admin tidak aktif. Login kembali.');
       const update = { status, published_at: status === 'published' ? (article.published_at || new Date().toISOString()) : null };
       const result = await db.from('articles').update(update).eq('id', id).select('id').maybeSingle();
       if (result.error) throw result.error;
@@ -474,7 +487,7 @@
 
   async function deleteReport(id) {
     if (actionRunning) return;
-    const report = reports.find(item => item.id === id);
+    const report = reports.find(item => String(item.id) === String(id));
     if (!report) return;
     if (!confirm('HAPUS PERMANEN laporan “' + (report.title || '(Tanpa judul)') + '”? Data laporan terkait akan dihapus. Tindakan ini tidak dapat dibatalkan.')) return;
     setActionBusy(true);
@@ -485,8 +498,9 @@
       const result = await db.rpc('admin_delete_public_report', { p_report_id: id });
       if (result.error) throw result.error;
       if (result.data === false) throw new Error('Laporan tidak ditemukan atau tidak berhasil dihapus.');
-      if (activeReport?.id === id) {
+      if (activeReport && String(activeReport.id) === String(id)) {
         $('report-detail-panel')?.classList.add('hidden');
+        $('report-evidence')?.replaceChildren();
         activeReport = null;
       }
       await refreshAll();
@@ -499,11 +513,14 @@
     }
   }
 
-  function showReport(id) {
-    const report = reports.find(item => item.id === id);
+  async function showReport(id) {
+    const report = reports.find(item => String(item.id) === String(id));
     if (!report) return;
     activeReport = report;
+
     const detail = $('report-detail');
+    const evidence = $('report-evidence');
+
     if (detail) {
       detail.textContent = 'Judul: ' + (report.title || '-') + '\n\n' +
         'Isi laporan:\n' + (report.body || '-') + '\n\n' +
@@ -511,12 +528,75 @@
         'Status: ' + (report.status || '-') + '\n\n' +
         'Catatan pemeriksa: ' + (report.reviewer_notes || '-');
     }
+
+    if (evidence) {
+      evidence.replaceChildren();
+
+      if (!report.evidence_path) {
+        const note = document.createElement('p');
+        note.className = 'muted';
+        note.textContent = 'Tidak ada foto/video bukti yang dilampirkan pada laporan ini.';
+        evidence.append(note);
+      } else {
+        const loading = document.createElement('p');
+        loading.className = 'muted';
+        loading.textContent = 'Memeriksa akses bukti privat…';
+        evidence.append(loading);
+
+        $('report-detail-panel')?.classList.remove('hidden');
+
+        try {
+          const authorized = await verifyAdmin();
+          if (!authorized) throw new Error('Sesi admin tidak aktif. Silakan login kembali.');
+
+          const { data, error } = await db.storage
+            .from('laporan-bukti')
+            .createSignedUrl(report.evidence_path, 300);
+
+          if (error || !data?.signedUrl) {
+            throw error || new Error('Tautan bukti tidak tersedia.');
+          }
+
+          evidence.replaceChildren();
+          const path = String(report.evidence_path).toLowerCase();
+          const isVideo = /\.(mp4|webm)$/.test(path);
+          const media = document.createElement(isVideo ? 'video' : 'img');
+          media.src = data.signedUrl;
+          media.style.cssText = 'display:block;max-width:100%;max-height:560px;height:auto;margin:10px 0;border-radius:10px;';
+
+          if (isVideo) {
+            media.controls = true;
+            media.preload = 'metadata';
+          } else {
+            media.alt = 'Bukti laporan masyarakat';
+            media.loading = 'lazy';
+          }
+
+          evidence.append(media);
+
+          const link = document.createElement('a');
+          link.href = data.signedUrl;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = 'Buka bukti di tab baru (tautan berlaku 5 menit)';
+          evidence.append(link);
+        } catch (error) {
+          evidence.replaceChildren();
+          const note = document.createElement('p');
+          note.className = 'status';
+          note.textContent = 'Bukti belum dapat ditampilkan: ' + (error?.message || 'kesalahan akses');
+          evidence.append(note);
+          console.error('Gagal membuka bukti laporan:', error);
+        }
+      }
+    }
+
     $('report-detail-panel')?.classList.remove('hidden');
     $('report-detail-panel')?.scrollIntoView({ behavior: 'smooth' });
   }
 
   function useReportAsDraft(id) {
-    const report = reports.find(item => item.id === id);
+    const report = reports.find(item => String(item.id) === String(id));
     if (!report) return;
     resetForm();
     $('title').value = report.title || '';
@@ -556,7 +636,6 @@
         };
       };
 
-      // Try direct fetch first; many news sites block browser access through CORS.
       try {
         const response = await fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', redirect: 'follow' });
         if (response.ok) {
@@ -565,7 +644,6 @@
         }
       } catch (_) {}
 
-      // Reader fallback can extract metadata and readable article text when direct fetch is blocked.
       if (!title || !summary || !body || !image) {
         const response = await fetch('https://r.jina.ai/' + url, { method: 'GET', credentials: 'omit' });
         if (!response.ok) throw new Error('Layanan pembaca tautan menjawab ' + response.status);
@@ -578,7 +656,6 @@
           title = titleLine ? titleLine.replace(/^Title:\s*/i, '').trim()
             : heading ? heading.replace(/^#{1,2}\s+/, '').replace(/\s+#+$/, '').trim() : '';
         }
-        // Jina Reader commonly represents article images as Markdown links.
         if (!image) {
           const imageMatch = text.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)/i);
           if (imageMatch) { try { image = new URL(imageMatch[1], url).href; } catch (_) {} }
@@ -734,7 +811,6 @@
     message('article-message', 'Foto berhasil dipilih untuk pratinjau. Foto ini belum tersimpan; masukkan URL foto pada kolom Foto utama.');
   }
 
-  let provinceCache = [];
   function setOptions(select, items, placeholder) {
     if (!select) return;
     const html = ['<option value="">' + esc(placeholder) + '</option>'];
@@ -787,12 +863,14 @@
   async function handleProvinceChange() {
     clearLocationChildren();
     const selected = $('province-select')?.value || '';
-    $('regency-select').disabled = true; $('district-select').disabled = true; $('village-select').disabled = true;
+    if ($('regency-select')) $('regency-select').disabled = true;
+    if ($('district-select')) $('district-select').disabled = true;
+    if ($('village-select')) $('village-select').disabled = true;
     if (selected) {
       try {
         const rows = await loadChildren('regency', selected);
         setOptions($('regency-select'), rows, 'Pilih kabupaten/kota');
-        $('regency-select').disabled = false;
+        if ($('regency-select')) $('regency-select').disabled = false;
       } catch (error) {
         setOptions($('regency-select'), [], 'Daftar gagal dimuat — isi lokasi manual');
         message('article-message', 'Kabupaten/kota gagal dimuat. Silakan gunakan lokasi manual.');
@@ -804,13 +882,14 @@
   async function handleRegencyChange() {
     setOptions($('district-select'), [], 'Memuat kecamatan…');
     setOptions($('village-select'), [], 'Pilih kecamatan dahulu');
-    $('district-select').disabled = true; $('village-select').disabled = true;
+    if ($('district-select')) $('district-select').disabled = true;
+    if ($('village-select')) $('village-select').disabled = true;
     const selected = $('regency-select')?.value || '';
     if (selected) {
       try {
         const rows = await loadChildren('district', selected);
         setOptions($('district-select'), rows, 'Pilih kecamatan');
-        $('district-select').disabled = false;
+        if ($('district-select')) $('district-select').disabled = false;
       } catch (error) {
         setOptions($('district-select'), [], 'Daftar gagal dimuat — isi lokasi manual');
       }
@@ -820,13 +899,13 @@
 
   async function handleDistrictChange() {
     setOptions($('village-select'), [], 'Memuat kelurahan/desa…');
-    $('village-select').disabled = true;
+    if ($('village-select')) $('village-select').disabled = true;
     const selected = $('district-select')?.value || '';
     if (selected) {
       try {
         const rows = await loadChildren('village', selected);
         setOptions($('village-select'), rows, 'Pilih kelurahan/desa');
-        $('village-select').disabled = false;
+        if ($('village-select')) $('village-select').disabled = false;
       } catch (error) {
         setOptions($('village-select'), [], 'Daftar gagal dimuat — isi lokasi manual');
       }
@@ -894,8 +973,8 @@
     $('source').value = article.source_url || '';
     $('image').value = article.image_path || '';
     $('status').value = article.status || 'draft';
-    $('location-manual').value = article.location_manual || '';
-    $('location-detail').value = article.location_detail || '';
+    if ($('location-manual')) $('location-manual').value = article.location_manual || '';
+    if ($('location-detail')) $('location-detail').value = article.location_detail || '';
     if ($('form-title')) $('form-title').textContent = 'Edit Berita';
     try { await restoreLocation(article); } catch (error) { console.warn('Lokasi lama tidak dapat dipulihkan:', error); }
     updateRegionDisplay();
@@ -922,6 +1001,7 @@
     });
     $('close-report-btn')?.addEventListener('click', () => {
       $('report-detail-panel')?.classList.add('hidden');
+      $('report-evidence')?.replaceChildren();
       activeReport = null;
     });
     document.addEventListener('click', event => {
