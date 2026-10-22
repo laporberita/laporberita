@@ -23,6 +23,7 @@
     .article-source{margin-top:28px}
     .article-actions{margin-top:28px;display:flex;gap:12px;flex-wrap:wrap}
     .article-error{padding:18px;background:#eef6ff;border-radius:10px}
+    .media-unavailable{padding:12px 14px;background:#f3f4f6;border-radius:8px;color:#667085;font-size:.95rem}
   </style>
 </head>
 <body>
@@ -34,117 +35,195 @@
       <a class="button" href="index.html">Beranda</a>
     </div>
   </header>
+
   <main class="container">
     <article class="page article-page" id="article" aria-live="polite">
       <p class="muted">Memuat artikel…</p>
     </article>
   </main>
+
   <footer class="footer">
     <div class="container">LAPOR BERITA · Media Berita Pendidikan Indonesia</div>
   </footer>
+
   <script>
   (() => {
     'use strict';
+
     const root = document.getElementById('article');
     const cfg = window.LAPOR_BERITA_CONFIG;
+
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[char]));
+
     function safeHttpUrl(value) {
       if (typeof value !== 'string' || !value.trim()) return null;
       try {
-        const url = new URL(value, window.location.href);
+        const url = new URL(value.trim(), window.location.href);
         return ['https:', 'http:'].includes(url.protocol) ? url.href : null;
-      } catch (_) { return null; }
+      } catch (_) {
+        return null;
+      }
     }
+
     function parseMedia(value) {
-      if (Array.isArray(value)) return value.filter(item => typeof item === 'string');
+      if (Array.isArray(value)) {
+        return value.filter(item => typeof item === 'string' && item.trim());
+      }
       if (typeof value === 'string' && value.trim()) {
         try {
           const parsed = JSON.parse(value);
-          if (Array.isArray(parsed)) return parsed.filter(item => typeof item === 'string');
+          if (Array.isArray(parsed)) {
+            return parsed.filter(item => typeof item === 'string' && item.trim());
+          }
         } catch (_) {
           if (/^https?:\/\//i.test(value.trim())) return [value.trim()];
         }
       }
       return [];
     }
+
     function formatDate(value) {
       if (!value) return '';
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
-      return date.toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'});
+      return date.toLocaleDateString('id-ID', {
+        day: 'numeric', month: 'long', year: 'numeric'
+      });
     }
+
     function showError(title, detail) {
-      root.innerHTML = '<div class="article-error"><h1>' + esc(title) + '</h1><p>' +
+      root.innerHTML =
+        '<div class="article-error"><h1>' + esc(title) + '</h1><p>' +
         esc(detail) + '</p><p><a href="index.html">Kembali ke Beranda</a></p></div>';
     }
-    // Isi artikel ditampilkan sebagai teks aman, bukan HTML yang dapat menjalankan kode.
+
     function mediaMarkup(value) {
       return parseMedia(value).slice(0, 10).map((raw, index) => {
         const url = safeHttpUrl(raw);
         if (!url) return '';
         const pathname = new URL(url).pathname.toLowerCase();
         const isVideo = /\.(mp4|webm|ogg|mov|m4v)$/i.test(pathname);
+
         if (isVideo) {
-          return '<div class="article-media-item"><video controls preload="metadata" playsinline src="' + esc(url) +
-            '">Browser Anda tidak mendukung pemutar video.</video><p><a href="' + esc(url) +
+          return '<div class="article-media-item"><video controls preload="metadata" playsinline src="' +
+            esc(url) + '">Browser Anda tidak mendukung pemutar video.</video>' +
+            '<p><a href="' + esc(url) +
             '" target="_blank" rel="noopener noreferrer">Buka video di tab baru</a></p></div>';
         }
+
         return '<div class="article-media-item"><img loading="lazy" src="' + esc(url) +
-          '" alt="Media tambahan berita ' + (index + 1) + '"><p><a href="' + esc(url) +
+          '" alt="Foto tambahan berita ' + (index + 1) + '">' +
+          '<p><a href="' + esc(url) +
           '" target="_blank" rel="noopener noreferrer">Buka foto di tab baru</a></p></div>';
       }).join('');
     }
+
     async function init() {
       const id = new URLSearchParams(window.location.search).get('id');
+
       if (!id) {
         showError('Artikel tidak ditemukan', 'Tautan artikel tidak mencantumkan ID berita.');
         return;
       }
-      if (!cfg?.SUPABASE_URL || !cfg?.SUPABASE_PUBLISHABLE_KEY || !window.supabase?.createClient) {
+
+      if (!cfg?.SUPABASE_URL || !cfg?.SUPABASE_PUBLISHABLE_KEY ||
+          !window.supabase?.createClient) {
         showError('Halaman belum siap', 'Konfigurasi berita belum termuat. Silakan muat ulang halaman.');
         return;
       }
+
       try {
-        const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY);
+        const db = window.supabase.createClient(
+          cfg.SUPABASE_URL, cfg.SUPABASE_PUBLISHABLE_KEY
+        );
+
         const result = await db.from('articles')
           .select('id,title,slug,summary,body,category_id,image_path,author_label,source_url,status,published_at,created_at,region_type,province,regency,city,media_urls')
-          .eq('id', id).eq('status', 'published').maybeSingle();
+          .eq('id', id)
+          .eq('status', 'published')
+          .maybeSingle();
+
         if (result.error) throw result.error;
+
         const article = result.data;
         if (!article) {
           showError('Artikel tidak ditemukan', 'Berita mungkin belum diterbitkan atau tidak tersedia untuk publik.');
           return;
         }
+
         document.title = (article.title || 'Artikel') + ' — LAPOR BERITA';
+
         const place = article.city || article.regency || article.province || 'Pendidikan';
         const publishedDate = formatDate(article.published_at);
         const sourceUrl = safeHttpUrl(article.source_url);
-        const imageUrl = safeHttpUrl(article.image_path);
-        const extraMedia = mediaMarkup(article.media_urls);
+
+        /*
+          Artikel "Uji foto" sebelumnya memakai tangkapan layar panel admin
+          sebagai media uji. Media disembunyikan hanya pada artikel uji itu.
+          Foto dan video semua artikel berita lain tetap ditampilkan.
+        */
+        const testText = String((article.title || '') + ' ' + (article.slug || ''));
+        const isTestArticle = /uji[\s_-]*foto/i.test(testText);
+        const imageUrl = isTestArticle ? null : safeHttpUrl(article.image_path);
+        const extraMedia = isTestArticle ? '' : mediaMarkup(article.media_urls);
+
         root.innerHTML =
           '<p><a href="index.html">Beranda</a> / <span class="tag">' + esc(place) + '</span></p>' +
           '<h1>' + esc(article.title || 'Tanpa judul') + '</h1>' +
           '<p class="article-meta">' + esc(article.author_label || 'Redaksi LAPOR BERITA') +
           (publishedDate ? ' · ' + esc(publishedDate) : '') + '</p>' +
-          (imageUrl ? '<img class="article-cover" src="' + esc(imageUrl) + '" alt="Foto utama berita" fetchpriority="high">' : '') +
-          (article.summary ? '<p class="article-summary"><strong>' + esc(article.summary) + '</strong></p>' : '') +
+          (imageUrl
+            ? '<img class="article-cover" id="article-cover" src="' + esc(imageUrl) +
+              '" alt="Foto utama berita" fetchpriority="high">'
+            : '') +
+          (article.summary
+            ? '<p class="article-summary"><strong>' + esc(article.summary) + '</strong></p>'
+            : '') +
           '<div class="article-body">' + esc(article.body || '') + '</div>' +
           (extraMedia ? '<section class="article-media"><h2>Foto dan Video</h2>' + extraMedia + '</section>' : '') +
-          (sourceUrl ? '<p class="notice article-source">Sumber: <a href="' + esc(sourceUrl) +
-            '" target="_blank" rel="noopener noreferrer">Baca sumber asli</a></p>' : '') +
+          (sourceUrl
+            ? '<p class="notice article-source">Sumber: <a href="' + esc(sourceUrl) +
+              '" target="_blank" rel="noopener noreferrer">Baca sumber asli</a></p>'
+            : '') +
           '<div class="article-actions"><button type="button" class="button" id="share-article">Bagikan Berita</button>' +
           '<a class="button secondary" href="index.html">Kembali ke Beranda</a></div>';
+
+        // Jika URL gambar rusak, beri pesan pada tempat gambar saja; artikel tetap tampil.
+        const cover = document.getElementById('article-cover');
+        if (cover) {
+          cover.addEventListener('error', () => {
+            const note = document.createElement('p');
+            note.className = 'media-unavailable';
+            note.textContent = 'Foto utama belum dapat ditampilkan.';
+            cover.replaceWith(note);
+          }, { once: true });
+        }
+
+        root.querySelectorAll('.article-media img').forEach(img => {
+          img.addEventListener('error', () => {
+            const note = document.createElement('p');
+            note.className = 'media-unavailable';
+            note.textContent = 'Foto tambahan belum dapat ditampilkan.';
+            img.replaceWith(note);
+          }, { once: true });
+        });
+
         document.getElementById('share-article')?.addEventListener('click', async () => {
           try {
-            if (navigator.share) await navigator.share({title:document.title, url:window.location.href});
-            else if (navigator.clipboard?.writeText) {
+            if (navigator.share) {
+              await navigator.share({ title: document.title, url: window.location.href });
+            } else if (navigator.clipboard?.writeText) {
               await navigator.clipboard.writeText(window.location.href);
               alert('Tautan berita berhasil disalin.');
-            } else window.prompt('Salin tautan berita ini:', window.location.href);
+            } else {
+              window.prompt('Salin tautan berita ini:', window.location.href);
+            }
           } catch (error) {
-            if (error?.name !== 'AbortError') window.prompt('Salin tautan berita ini:', window.location.href);
+            if (error?.name !== 'AbortError') {
+              window.prompt('Salin tautan berita ini:', window.location.href);
+            }
           }
         });
       } catch (error) {
@@ -152,6 +231,7 @@
         showError('Berita gagal dimuat', 'Periksa koneksi internet, lalu muat ulang halaman.');
       }
     }
+
     init();
   })();
   </script>
