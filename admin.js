@@ -181,22 +181,256 @@
   }
 
   async function getReports() {
-    const columns = 'id,title,body,proposed_category_id,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at,evidence_path';
+    // Dipanggil dari refreshAll() setelah hak admin diverifikasi.
+    // select('*') dipakai agar kolom foto yang sudah ada di skema lama/baru
+    // tetap terbaca, tanpa mengasumsikan nama kolom tertentu.
     const result = await db.from('public_reports')
-      .select(columns)
-      .order('created_at', { ascending: false }).limit(200);
-    if (!result.error) return result.data || [];
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (result.error) throw result.error;
 
-    // Backward compatibility: if evidence_path has not reached the database schema cache,
-    // load the original columns so the rest of the admin panel remains usable.
-    if (isMissingColumn(result.error)) {
-      const fallback = await db.from('public_reports')
-        .select('id,title,body,proposed_category_id,source_url,status,reviewer_notes,published_article_id,created_at,reviewed_at')
-        .order('created_at', { ascending: false }).limit(200);
-      if (fallback.error) throw fallback.error;
-      return fallback.data || [];
+    return (result.data || []).map(report => {
+      const reportMedia = readReportMedia(report, 'evidence');
+      const identityMedia = readReportMedia(report, 'identity');
+      return Object.assign({}, report, {
+        evidence_path: reportMedia[0]?.value || report.evidence_path || null,
+        __laporBeritaEvidenceMedia: reportMedia,
+        __laporBeritaIdentityMedia: identityMedia
+      });
+    });
+  }
+
+  const REPORT_EVIDENCE_FIELDS = [
+    'evidence_path', 'evidence_url', 'evidence_paths', 'evidence_urls', 'evidence',
+    'evidence_file', 'evidence_files', 'evidence_image', 'evidence_image_path', 'evidence_image_url',
+    'proof_path', 'proof_url', 'proof_photo_path', 'proof_photo_url',
+    'report_photo_path', 'report_photo_url', 'report_photo', 'report_image_path', 'report_image_url',
+    'report_media_path', 'report_media_url', 'report_media',
+    'news_photo_path', 'news_photo_url', 'news_photo', 'news_image_path', 'news_image_url',
+    'photo_path', 'photo_url', 'photo_paths', 'photo_urls', 'photo',
+    'image_path', 'image_url', 'image_paths', 'image_urls', 'image',
+    'source_image_path', 'source_image_url', 'documentation_path', 'documentation_url',
+    'attachment_path', 'attachment_url', 'attachment', 'attachments',
+    'document_path', 'document_url', 'upload_path', 'upload_url', 'uploaded_file_path', 'uploaded_file_url',
+    'media_path', 'media_url', 'media_urls', 'media', 'media_files', 'report_files', 'photos', 'images', 'files'
+  ];
+
+  const REPORT_IDENTITY_FIELDS = [
+    'ktp_path', 'ktp_url', 'ktp_photo_path', 'ktp_photo_url',
+    'ktp_image_path', 'ktp_image_url', 'ktp_image', 'foto_ktp_path', 'foto_ktp_url',
+    'identity_photo_path', 'identity_photo_url', 'identity_image_path', 'identity_image_url',
+    'identity_path', 'identity_url', 'id_card_path', 'id_card_url', 'id_card_image_path', 'id_card_image_url',
+    'id_card_photo_path', 'id_card_photo_url', 'id_card_photo', 'reporter_ktp_path', 'reporter_ktp_url',
+    'reporter_identity_path', 'identity_document_path', 'identity_document_url', 'identity_document',
+    'ktp_file_path', 'ktp_file_url', 'ktp_photo', 'foto_ktp'
+  ];
+
+  function mediaValues(value) {
+    if (value == null || value === '') return [];
+    if (Array.isArray(value)) return value.flatMap(mediaValues);
+    if (typeof value === 'object') {
+      const candidate = value.path || value.fullPath || value.full_path ||
+        value.url || value.publicUrl || value.public_url || value.signedUrl || value.signed_url;
+      return candidate ? mediaValues(candidate) : [];
     }
-    throw result.error;
+    if (typeof value !== 'string') return [];
+    const textValue = value.trim();
+    if (!textValue) return [];
+    if ((textValue.startsWith('[') && textValue.endsWith(']')) ||
+        (textValue.startsWith('{') && textValue.endsWith('}'))) {
+      try {
+        const parsed = JSON.parse(textValue);
+        if (parsed !== value) return mediaValues(parsed);
+      } catch (_) {
+        // Bukan JSON; perlakukan sebagai satu URL/jalur berkas.
+      }
+    }
+    return [textValue];
+  }
+
+  function readReportMedia(report, kind) {
+    if (!report || typeof report !== 'object') return [];
+    const fields = kind === 'identity' ? REPORT_IDENTITY_FIELDS : REPORT_EVIDENCE_FIELDS;
+    const output = [];
+    const seen = new Set();
+
+    fields.forEach(field => {
+      if (!(field in report)) return;
+      mediaValues(report[field]).forEach(value => {
+        const key = String(value).trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        output.push({ field, value: key, kind });
+      });
+    });
+    return output;
+  }
+
+  function decodeStoragePath(path) {
+    return String(path || '').split('/').map(part => {
+      try { return decodeURIComponent(part); }
+      catch (_) { return part; }
+    }).join('/');
+  }
+
+  function parseReportStorageReference(value, defaultBucket = 'laporan-bukti') {
+    const raw = String(value || '').trim();
+    if (!raw) throw new Error('Jalur foto kosong.');
+
+    let bucket = defaultBucket;
+    let path = raw;
+    let directUrl = null;
+    const projectOrigin = (() => {
+      try { return new URL(cfg.SUPABASE_URL).origin; }
+      catch (_) { return ''; }
+    })();
+
+    if (/^https?:\/\//i.test(raw)) {
+      let parsed;
+      try { parsed = new URL(raw); }
+      catch (_) { throw new Error('Tautan foto tidak valid.'); }
+
+      if (parsed.origin !== projectOrigin) {
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          throw new Error('Protokol tautan foto tidak aman.');
+        }
+        return { directUrl: parsed.href, bucket: null, path: null };
+      }
+
+      const match = parsed.pathname.match(
+        /\/storage\/v1\/(?:object|render\/image)\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/i
+      );
+      if (match) {
+        bucket = decodeURIComponent(match[1]);
+        path = match[2];
+      } else {
+        throw new Error('URL Supabase tidak memiliki jalur berkas Storage yang dikenali.');
+      }
+    } else {
+      path = path.replace(/^\/+/, '');
+      const match = path.match(
+        /^(?:(?:storage\/v1\/)?(?:object|render\/image)\/)?(?:public|sign|authenticated)\/([^/]+)\/(.+)$/i
+      );
+      if (match) {
+        bucket = match[1];
+        path = match[2];
+      } else {
+        const bucketMatch = path.match(/^(laporan-bukti|berita-media)\/(.+)$/i);
+        if (bucketMatch) {
+          bucket = bucketMatch[1];
+          path = bucketMatch[2];
+        }
+      }
+    }
+
+    path = decodeStoragePath(path.split('?')[0]);
+    if (!path || path.split('/').some(part => part === '..')) {
+      throw new Error('Jalur foto tidak valid.');
+    }
+
+    // Foto identitas tidak boleh ditarik dari bucket berita yang bersifat publik.
+    if (bucket.toLowerCase() === 'berita-media') {
+      return { directUrl: db.storage.from('berita-media').getPublicUrl(path).data?.publicUrl || null,
+        bucket: 'berita-media', path };
+    }
+
+    // Semua jalur tanpa bucket eksplisit dianggap sebagai objek privat laporan.
+    return { directUrl: null, bucket, path };
+  }
+
+  async function getReportMediaUrl(item, isIdentity) {
+    const ref = parseReportStorageReference(item.value, 'laporan-bukti');
+
+    if (isIdentity && ref.bucket !== 'laporan-bukti') {
+      throw new Error('Foto KTP harus berada di bucket privat "laporan-bukti". Periksa penyimpanannya demi keamanan data pelapor.');
+    }
+
+    if (ref.directUrl) {
+      if (isIdentity) {
+        throw new Error('Foto KTP ditemukan sebagai tautan eksternal. Untuk menjaga privasi, simpan di bucket privat laporan-bukti.');
+      }
+      return ref.directUrl;
+    }
+
+    if (!ref.path || !ref.bucket) throw new Error('Jalur foto tidak lengkap.');
+    if (ref.bucket !== 'laporan-bukti' && ref.bucket !== 'berita-media') {
+      throw new Error('Bucket foto tidak dikenal: ' + ref.bucket + '.');
+    }
+
+    if (ref.bucket === 'berita-media') {
+      return db.storage.from(ref.bucket).getPublicUrl(ref.path).data?.publicUrl || null;
+    }
+
+    const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
+    if (error || !data?.signedUrl) {
+      throw error || new Error('Tautan foto privat tidak tersedia.');
+    }
+    return data.signedUrl;
+  }
+
+  async function renderReportMediaGroup(container, items, heading, isIdentity = false) {
+    if (!container || !items.length) return false;
+
+    const section = document.createElement('section');
+    section.style.cssText = 'margin:14px 0;padding:12px;border:1px solid #d9e2ec;border-radius:10px;';
+    const title = document.createElement('h4');
+    title.textContent = heading;
+    title.style.cssText = 'margin:0 0 10px;';
+    section.appendChild(title);
+
+    for (const item of items) {
+      const itemBox = document.createElement('div');
+      itemBox.style.cssText = 'margin:10px 0;padding-top:8px;border-top:1px solid #edf2f7;';
+      const fieldLabel = document.createElement('p');
+      fieldLabel.className = 'muted';
+      fieldLabel.textContent = 'Berkas: ' + item.field;
+      itemBox.appendChild(fieldLabel);
+
+      try {
+        const url = await getReportMediaUrl(item, isIdentity);
+        if (!url) throw new Error('URL foto tidak berhasil dibuat.');
+        const pathname = (() => { try { return new URL(url).pathname; } catch (_) { return item.value; } })().toLowerCase();
+        const isVideo = /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i.test(pathname);
+        const media = document.createElement(isVideo ? 'video' : 'img');
+        media.src = url;
+        media.style.cssText = 'display:block;max-width:100%;max-height:560px;height:auto;margin:8px 0;border-radius:8px;background:#f3f6f9;';
+        if (isVideo) {
+          media.controls = true;
+          media.preload = 'metadata';
+        } else {
+          media.alt = isIdentity ? 'Foto KTP pelapor — hanya untuk verifikasi internal' : 'Foto bukti laporan masyarakat';
+          media.loading = 'eager';
+        }
+        media.addEventListener('error', () => {
+          const warning = document.createElement('p');
+          warning.className = 'status';
+          warning.textContent = 'Berkas ditemukan, tetapi tidak dapat ditampilkan. Periksa apakah file masih ada di Storage dan jenis berkasnya benar.';
+          itemBox.appendChild(warning);
+        }, { once: true });
+        itemBox.appendChild(media);
+
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = isIdentity
+          ? 'Buka foto identitas untuk verifikasi (tautan privat berlaku 5 menit)'
+          : 'Buka foto/video di tab baru' + (item.value.startsWith('http') ? '' : ' (tautan privat berlaku 5 menit)');
+        itemBox.appendChild(link);
+      } catch (error) {
+        const warning = document.createElement('p');
+        warning.className = 'status';
+        warning.textContent = 'Foto tidak dapat dibuka: ' + (error?.message || 'kesalahan akses');
+        itemBox.appendChild(warning);
+        console.error('Gagal memuat media laporan (' + item.field + '):', error);
+      }
+
+      section.appendChild(itemBox);
+    }
+
+    container.appendChild(section);
+    return true;
   }
 
   async function refreshAll() {
@@ -650,14 +884,31 @@
 
   async function showReport(id) {
     const report = reports.find(item => String(item.id) === String(id));
-    if (!report) return;
+    if (!report) {
+      message('report-message', 'Laporan tidak ditemukan. Muat ulang daftar laporan.', true);
+      return;
+    }
     activeReport = report;
 
     const detail = $('report-detail');
     const evidence = $('report-evidence');
+    const panel = $('report-detail-panel');
+    panel?.classList.remove('hidden');
 
     if (detail) {
+      const firstValue = keys => {
+        for (const key of keys) {
+          const value = report[key];
+          if (value !== null && value !== undefined && String(value).trim()) return String(value).trim();
+        }
+        return '-';
+      };
+      const reporterName = firstValue(['reporter_name', 'nama_pelapor', 'full_name', 'name', 'nama', 'pelapor_nama']);
+      const reporterNik = firstValue(['reporter_nik', 'nik_ktp', 'nik', 'ktp_number', 'nomor_ktp', 'pelapor_nik']);
       detail.textContent = 'Judul: ' + (report.title || '-') + '\n\n' +
+        'Identitas Pelapor (RAHASIA ADMIN)\n' +
+        'Nama: ' + reporterName + '\n' +
+        'NIK: ' + reporterNik + '\n\n' +
         'Isi laporan:\n' + (report.body || '-') + '\n\n' +
         'Sumber: ' + (report.source_url || '-') + '\n\n' +
         'Status: ' + (report.status || '-') + '\n\n' +
@@ -666,68 +917,43 @@
 
     if (evidence) {
       evidence.replaceChildren();
+      const loading = document.createElement('p');
+      loading.className = 'muted';
+      loading.textContent = 'Memeriksa izin admin dan memuat berkas laporan…';
+      evidence.appendChild(loading);
 
-      if (!report.evidence_path) {
-        const note = document.createElement('p');
-        note.className = 'muted';
-        note.textContent = 'Tidak ada foto/video bukti yang dilampirkan pada laporan ini.';
-        evidence.append(note);
-      } else {
-        const loading = document.createElement('p');
-        loading.className = 'muted';
-        loading.textContent = 'Memeriksa akses bukti privat…';
-        evidence.append(loading);
+      try {
+        const authorized = await verifyAdmin();
+        if (!authorized) throw new Error('Sesi admin berakhir. Silakan login kembali.');
 
-        $('report-detail-panel')?.classList.remove('hidden');
+        evidence.replaceChildren();
+        const reportMedia = report.__laporBeritaEvidenceMedia || readReportMedia(report, 'evidence');
+        const identityMedia = report.__laporBeritaIdentityMedia || readReportMedia(report, 'identity');
 
-        try {
-          const authorized = await verifyAdmin();
-          if (!authorized) throw new Error('Sesi admin tidak aktif. Silakan login kembali.');
+        const hasReportMedia = await renderReportMediaGroup(
+          evidence, reportMedia, 'Foto / Video Bukti Laporan Masyarakat', false
+        );
+        const hasIdentityMedia = await renderReportMediaGroup(
+          evidence, identityMedia, 'Foto KTP / Identitas Pelapor — RAHASIA ADMIN', true
+        );
 
-          const { data, error } = await db.storage
-            .from('laporan-bukti')
-            .createSignedUrl(report.evidence_path, 300);
-
-          if (error || !data?.signedUrl) {
-            throw error || new Error('Tautan bukti tidak tersedia.');
-          }
-
-          evidence.replaceChildren();
-          const path = String(report.evidence_path).toLowerCase();
-          const isVideo = /\.(mp4|webm)$/.test(path);
-          const media = document.createElement(isVideo ? 'video' : 'img');
-          media.src = data.signedUrl;
-          media.style.cssText = 'display:block;max-width:100%;max-height:560px;height:auto;margin:10px 0;border-radius:10px;';
-
-          if (isVideo) {
-            media.controls = true;
-            media.preload = 'metadata';
-          } else {
-            media.alt = 'Bukti laporan masyarakat';
-            media.loading = 'lazy';
-          }
-
-          evidence.append(media);
-
-          const link = document.createElement('a');
-          link.href = data.signedUrl;
-          link.target = '_blank';
-          link.rel = 'noopener noreferrer';
-          link.textContent = 'Buka bukti di tab baru (tautan berlaku 5 menit)';
-          evidence.append(link);
-        } catch (error) {
-          evidence.replaceChildren();
+        if (!hasReportMedia && !hasIdentityMedia) {
           const note = document.createElement('p');
-          note.className = 'status';
-          note.textContent = 'Bukti belum dapat ditampilkan: ' + (error?.message || 'kesalahan akses');
-          evidence.append(note);
-          console.error('Gagal membuka bukti laporan:', error);
+          note.className = 'muted';
+          note.textContent = 'Belum ada jalur foto yang ditemukan pada data laporan ini. Foto harus memiliki jalur berkas di public_reports dan berkasnya tersedia di Storage.';
+          evidence.appendChild(note);
         }
+      } catch (error) {
+        evidence.replaceChildren();
+        const note = document.createElement('p');
+        note.className = 'status';
+        note.textContent = 'Bukti belum dapat ditampilkan: ' + (error?.message || 'kesalahan akses');
+        evidence.appendChild(note);
+        console.error('Gagal membuka bukti laporan:', error);
       }
     }
 
-    $('report-detail-panel')?.classList.remove('hidden');
-    $('report-detail-panel')?.scrollIntoView({ behavior: 'smooth' });
+    panel?.scrollIntoView({ behavior: 'smooth' });
   }
 
   function useReportAsDraft(id) {
