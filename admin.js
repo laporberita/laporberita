@@ -376,6 +376,33 @@
     }
   }
 
+  async function uploadMainImage(file, articleId, existingImageUrl) {
+    if (!file) return existingImageUrl || null;
+    if (!file.type.startsWith('image/')) {
+      throw new Error('Foto utama harus berupa berkas gambar.');
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      throw new Error('Ukuran foto utama maksimal 20 MB.');
+    }
+    const cleanName = file.name.normalize('NFKD').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-90) || 'foto-utama';
+    const safeId = String(articleId || 'berita-' + Date.now()).replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const path = 'foto-utama/' + safeId + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 9) + '-' + cleanName;
+    const upload = await db.storage.from(NEWS_MEDIA_BUCKET).upload(path, file, {
+      cacheControl: '3600', upsert: false, contentType: file.type || undefined
+    });
+    if (upload.error) {
+      const msg = upload.error.message || 'unggahan gagal';
+      if (/bucket not found/i.test(msg)) {
+        throw new Error('Bucket Storage "' + NEWS_MEDIA_BUCKET + '" belum ada. Pastikan bucket berita-media sudah dibuat dan berstatus Public.');
+      }
+      throw new Error('Gagal mengunggah foto utama: ' + msg + '. Pastikan kebijakan INSERT Storage untuk admin sudah benar.');
+    }
+    const publicResult = db.storage.from(NEWS_MEDIA_BUCKET).getPublicUrl(path);
+    const publicUrl = publicResult?.data?.publicUrl;
+    if (!publicUrl) throw new Error('Foto utama terunggah, tetapi URL publik tidak berhasil dibuat. Periksa bucket berita-media.');
+    return publicUrl;
+  }
+
   async function uploadSelectedMedia(articleId, existingUrls) {
     const input = $('media-files');
     const files = Array.from(input?.files || []).slice(0, 10);
@@ -418,6 +445,7 @@
     const body = $('body')?.value.trim() || '';
     const sourceRaw = $('source')?.value.trim() || '';
     const imageRaw = $('image')?.value.trim() || '';
+    const mainImageFile = $('image-file')?.files?.[0] || null;
     const status = forcedStatus || $('status')?.value || 'draft';
     const sourceReportId = $('source-report-id')?.value || '';
 
@@ -453,7 +481,8 @@
       const now = new Date().toISOString();
       const location = getLocationValues();
       const oldMediaUrls = parseMediaUrls(existing?.media_urls);
-      message('article-message', 'Mengunggah foto/video tambahan dan menyimpan berita…');
+      message('article-message', 'Mengunggah foto utama dan foto/video tambahan…');
+      imageUrl = await uploadMainImage(mainImageFile, id || slug, imageUrl || existing?.image_path || null);
       const mediaUrls = await uploadSelectedMedia(id || slug, oldMediaUrls);
       const coreRecord = {
         title: title,
@@ -485,8 +514,19 @@
       if (result.error) throw result.error;
       const savedId = result.data?.id || id;
       if ($('media-files')) $('media-files').value = '';
+      if ($('image-file')) $('image-file').value = '';
       clearMediaPreviewUrls();
+      clearMainImagePreviewUrl();
       renderSavedMedia(mediaUrls);
+      if (imageUrl && $('image-preview')) {
+        $('image-preview').replaceChildren();
+        const savedImage = document.createElement('img');
+        savedImage.src = imageUrl;
+        savedImage.alt = 'Foto utama tersimpan';
+        savedImage.style.maxWidth = '220px';
+        savedImage.style.maxHeight = '180px';
+        $('image-preview').appendChild(savedImage);
+      }
       let reportWarning = '';
       if (status === 'published' && sourceReportId && savedId) {
         const reportUpdate = await db.from('public_reports').update({
@@ -896,14 +936,14 @@
     if (preview) preview.replaceChildren();
     if (!file || !preview) return;
     if (!file.type.startsWith('image/')) {
-      message('article-message', 'Pilih berkas gambar. Untuk penerbitan, gunakan URL foto karena unggahan langsung belum tersambung ke Storage.');
+      message('article-message', 'Pilih berkas gambar untuk foto utama.', true);
       return;
     }
     imagePreviewUrl = URL.createObjectURL(file);
     const img = document.createElement('img');
     img.src = imagePreviewUrl; img.alt = 'Pratinjau foto pilihan';
     preview.appendChild(img);
-    message('article-message', 'Foto berhasil dipilih untuk pratinjau. Foto ini belum tersimpan; masukkan URL foto pada kolom Foto utama.');
+    message('article-message', 'Foto utama siap diunggah. Tekan Simpan Berita agar foto tersimpan permanen di Storage.');
   }
 
   function setOptions(select, items, placeholder) {
