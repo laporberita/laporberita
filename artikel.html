@@ -132,12 +132,14 @@
         document.title = (article.title || 'Artikel') + ' — LAPOR BERITA';
         const place = article.city || article.regency || article.province || 'Pendidikan';
         const publishedDate = formatDate(article.published_at);
-        const imageUrl = safeHttpUrl(article.image_path);
         const sourceUrl = safeHttpUrl(article.source_url);
 
-        // Berita uji tidak menampilkan lampiran percobaan berupa tangkapan layar panel admin.
-        // Lampiran berita lain tetap ditampilkan seperti biasa.
+        // Artikel uji "Uji foto" pernah menggunakan tangkapan layar panel admin.
+        // Untuk mencegah panel admin tampil sebagai gambar di halaman publik,
+        // sembunyikan gambar utama DAN media tambahan hanya pada artikel uji ini.
+        // Foto dan video berita lainnya tetap ditampilkan seperti biasa.
         const isTestArticle = /uji[\s_-]*foto/i.test(String(article.title || '') + ' ' + String(article.slug || ''));
+        const imageUrl = isTestArticle ? null : safeHttpUrl(article.image_path);
         const extraMedia = isTestArticle ? '' : mediaMarkup(article.media_urls);
 
         root.innerHTML =
