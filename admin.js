@@ -362,35 +362,39 @@
       return db.storage.from(ref.bucket).getPublicUrl(ref.path).data?.publicUrl || null;
     }
 
-    // Bucket laporan-bukti bersifat privat. Minta Edge Function membuat
-    // signed URL dengan service role di server setelah memeriksa sesi admin.
-    // Jangan membuat signed URL dari browser: kebijakan Storage untuk user
-    // biasa sering menolak SELECT dan menghasilkan pesan menyesatkan
-    // "Object not found" meskipun berkas ada.
-    const { data, error } = await db.functions.invoke('kirim-laporan-berita', {
-      body: {
-        action: 'admin_signed_evidence_url',
-        report_id: String(item.reportId || ''),
-        path: item.value,
-        field: item.field || '',
-        kind: isIdentity ? 'identity' : 'evidence'
-      }
-    });
+    const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
+    if (!error && data?.signedUrl) return data.signedUrl;
 
-    if (error) {
-      let detail = error.message || 'Edge Function gagal membuat tautan foto.';
-      try {
-        if (error.context && typeof error.context.json === 'function') {
-          const body = await error.context.json();
-          detail = body?.message || body?.error || detail;
+    // Fallback terarah: fungsi kirim-laporan-berita menyimpan objek di
+    // folder bernama ID laporan (report.id). Jika evidence_path lama hanya
+    // menyimpan folder atau nama objeknya tidak persis cocok, cari berkas
+    // media di folder privat laporan itu. Fungsi ini hanya dipanggil dari
+    // panel setelah hak admin diverifikasi; berkas tetap privat dan hanya
+    // diberi signed URL singkat.
+    const firstError = error?.message || 'Tautan foto privat tidak tersedia.';
+    if (ref.bucket === 'laporan-bukti' && item.reportId) {
+      const folder = String(item.reportId).trim();
+      const { data: entries, error: listError } = await db.storage
+        .from('laporan-bukti')
+        .list(folder, { limit: 100, sortBy: { column: 'name', order: 'asc' } });
+
+      if (!listError && Array.isArray(entries)) {
+        const mediaEntries = entries.filter(entry => {
+          const name = String(entry?.name || '');
+          return /\.(jpg|jpeg|png|webp|mp4|webm)$/i.test(name) && !name.startsWith('.');
+        });
+        for (const entry of mediaEntries) {
+          const candidate = folder + '/' + entry.name;
+          const retry = await db.storage.from('laporan-bukti').createSignedUrl(candidate, 300);
+          if (!retry.error && retry.data?.signedUrl) return retry.data.signedUrl;
         }
-      } catch (_) {}
-      throw new Error(detail);
+      }
+      if (listError) {
+        console.error('Tidak dapat memeriksa folder bukti laporan:', listError.message);
+      }
     }
-    if (!data || data.success !== true || !data.signed_url) {
-      throw new Error(data?.message || 'Supabase belum berhasil membuat tautan foto privat.');
-    }
-    return data.signed_url;
+
+    throw new Error(firstError + ' Jalur tersimpan: ' + ref.path + '. Folder bukti laporan juga sudah diperiksa.');
   }
 
   async function renderReportMediaGroup(container, items, heading, isIdentity = false) {
@@ -1102,19 +1106,55 @@
       message('report-message', 'Laporan ini sudah diterbitkan. ID berita: ' + report.published_article_id);
       return;
     }
-    const ok = confirm('Terbitkan laporan “' + (report.title || '(Tanpa judul)') + '” sebagai berita publik sekarang? Pastikan isi laporan sudah diperiksa. Data pribadi pelapor tidak akan diterbitkan.');
+    const ok = confirm('Terbitkan laporan “' + (report.title || '(Tanpa judul)') + '” sebagai berita publik sekarang? Foto bukti berupa gambar akan disalin ke bucket publik berita-media. Pastikan foto memang layak dipublikasikan dan tidak memuat data pribadi atau informasi sensitif.');
     if (!ok) return;
     const title = String(report.title || '').trim();
     const body = String(report.body || '').trim();
     if (!title || !body) {
-      message('report-message', 'Laporan tidak memiliki judul atau isi. Buka “Periksa” dan lengkapi sebagai draf terlebih dahulu.', true);
+      message('report-message', 'Laporan tidak memiliki judul atau isi. Buka “Jadikan Draf” dan lengkapi terlebih dahulu.', true);
       return;
     }
+
     setActionBusy(true);
-    message('report-message', 'Menerbitkan laporan sebagai berita publik…');
+    message('report-message', 'Memeriksa laporan dan menyiapkan foto berita publik…');
+    let newPublicImageUrl = null;
     try {
       const authorized = await verifyAdmin();
       if (!authorized) throw new Error('Sesi admin tidak aktif. Silakan login kembali.');
+
+      // Bukti tetap privat sampai admin menekan Terbitkan. Hanya foto yang
+      // memiliki ekstensi gambar yang disalin oleh Edge Function terverifikasi.
+      // Video bukti tidak dipakai sebagai foto utama artikel.
+      const evidenceItems = report.__laporBeritaEvidenceMedia || readReportMedia(report, 'evidence');
+      const photoEvidence = evidenceItems.find(item => {
+        const value = String(item.value || '').split('?')[0].split('#')[0];
+        return /\.(jpg|jpeg|png|webp)$/i.test(value);
+      });
+
+      if (photoEvidence) {
+        message('report-message', 'Menyalin foto bukti ke media berita publik…');
+        const { data: imageData, error: imageError } = await db.functions.invoke('kirim-laporan-berita', {
+          body: {
+            action: 'admin_publish_report_image',
+            report_id: String(report.id)
+          }
+        });
+        if (imageError) {
+          let detail = imageError.message || 'Fungsi Supabase gagal menyiapkan foto publik.';
+          try {
+            if (imageError.context && typeof imageError.context.json === 'function') {
+              const errBody = await imageError.context.json();
+              detail = errBody?.message || errBody?.error || detail;
+            }
+          } catch (_) {}
+          throw new Error(detail);
+        }
+        if (!imageData || imageData.success !== true || !imageData.public_url) {
+          throw new Error(imageData?.message || 'Foto bukti belum berhasil disiapkan sebagai foto publik. Berita tidak diterbitkan agar tidak menampilkan foto bawaan sebagai pengganti.');
+        }
+        newPublicImageUrl = imageData.public_url;
+      }
+
       const now = new Date().toISOString();
       const slug = (slugify(title) || 'laporan') + '-' + Date.now().toString(36);
       const record = {
@@ -1124,7 +1164,9 @@
         body,
         category_id: report.proposed_category_id || null,
         source_url: validUrl(String(report.source_url || '').trim()),
-        image_path: null,
+        // Foto bukti menjadi foto utama berita hanya setelah admin menyetujui.
+        // Jika tidak ada foto gambar, null membiarkan situs memakai fallback.
+        image_path: newPublicImageUrl,
         author_label: 'Laporan Masyarakat — Redaksi LAPOR BERITA',
         status: 'published',
         published_at: now,
@@ -1132,15 +1174,16 @@
       };
       const inserted = await db.from('articles').insert(record).select('id').single();
       if (inserted.error) throw inserted.error;
+
       const updated = await db.from('public_reports').update({
         status: 'approved',
         published_article_id: inserted.data.id,
         reviewed_at: now
       }).eq('id', report.id);
       if (updated.error) {
-        message('report-message', 'Berita sudah terbit, tetapi status laporan gagal diperbarui: ' + updated.error.message + '. Jangan tekan Terbitkan lagi agar tidak membuat duplikat.', true);
+        message('report-message', 'Berita sudah terbit' + (newPublicImageUrl ? ' beserta foto yang dipilih' : '') + ', tetapi status laporan gagal diperbarui: ' + updated.error.message + '. Jangan tekan Terbitkan lagi agar tidak membuat duplikat.', true);
       } else {
-        message('report-message', 'Berhasil diterbitkan ke publik. Judul: ' + title + '.');
+        message('report-message', 'Berhasil diterbitkan ke publik' + (newPublicImageUrl ? ' dengan foto bukti sebagai foto berita' : ' tanpa foto bukti bergambar') + '. Data identitas pelapor tidak ikut diterbitkan.');
       }
       await refreshAll();
     } catch (error) {
