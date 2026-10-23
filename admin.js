@@ -362,39 +362,35 @@
       return db.storage.from(ref.bucket).getPublicUrl(ref.path).data?.publicUrl || null;
     }
 
-    const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
-    if (!error && data?.signedUrl) return data.signedUrl;
+    // Bucket laporan-bukti bersifat privat. Minta Edge Function membuat
+    // signed URL dengan service role di server setelah memeriksa sesi admin.
+    // Jangan membuat signed URL dari browser: kebijakan Storage untuk user
+    // biasa sering menolak SELECT dan menghasilkan pesan menyesatkan
+    // "Object not found" meskipun berkas ada.
+    const { data, error } = await db.functions.invoke('kirim-laporan-berita', {
+      body: {
+        action: 'admin_signed_evidence_url',
+        report_id: String(item.reportId || ''),
+        path: item.value,
+        field: item.field || '',
+        kind: isIdentity ? 'identity' : 'evidence'
+      }
+    });
 
-    // Fallback terarah: fungsi kirim-laporan-berita menyimpan objek di
-    // folder bernama ID laporan (report.id). Jika evidence_path lama hanya
-    // menyimpan folder atau nama objeknya tidak persis cocok, cari berkas
-    // media di folder privat laporan itu. Fungsi ini hanya dipanggil dari
-    // panel setelah hak admin diverifikasi; berkas tetap privat dan hanya
-    // diberi signed URL singkat.
-    const firstError = error?.message || 'Tautan foto privat tidak tersedia.';
-    if (ref.bucket === 'laporan-bukti' && item.reportId) {
-      const folder = String(item.reportId).trim();
-      const { data: entries, error: listError } = await db.storage
-        .from('laporan-bukti')
-        .list(folder, { limit: 100, sortBy: { column: 'name', order: 'asc' } });
-
-      if (!listError && Array.isArray(entries)) {
-        const mediaEntries = entries.filter(entry => {
-          const name = String(entry?.name || '');
-          return /\.(jpg|jpeg|png|webp|mp4|webm)$/i.test(name) && !name.startsWith('.');
-        });
-        for (const entry of mediaEntries) {
-          const candidate = folder + '/' + entry.name;
-          const retry = await db.storage.from('laporan-bukti').createSignedUrl(candidate, 300);
-          if (!retry.error && retry.data?.signedUrl) return retry.data.signedUrl;
+    if (error) {
+      let detail = error.message || 'Edge Function gagal membuat tautan foto.';
+      try {
+        if (error.context && typeof error.context.json === 'function') {
+          const body = await error.context.json();
+          detail = body?.message || body?.error || detail;
         }
-      }
-      if (listError) {
-        console.error('Tidak dapat memeriksa folder bukti laporan:', listError.message);
-      }
+      } catch (_) {}
+      throw new Error(detail);
     }
-
-    throw new Error(firstError + ' Jalur tersimpan: ' + ref.path + '. Folder bukti laporan juga sudah diperiksa.');
+    if (!data || data.success !== true || !data.signed_url) {
+      throw new Error(data?.message || 'Supabase belum berhasil membuat tautan foto privat.');
+    }
+    return data.signed_url;
   }
 
   async function renderReportMediaGroup(container, items, heading, isIdentity = false) {
