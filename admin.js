@@ -368,6 +368,32 @@
       return db.storage.from(ref.bucket).getPublicUrl(ref.path).data?.publicUrl || null;
     }
 
+    // Utamakan Edge Function untuk membuat signed URL foto privat.
+    // Ini menggunakan verifikasi admin di server dan menghindari kegagalan
+    // pratinjau akibat akses Storage langsung dari browser.
+    if (ref.bucket === 'laporan-bukti' && item.reportId) {
+      try {
+        const edgeResult = await db.functions.invoke('kirim-laporan-berita', {
+          body: {
+            action: 'admin_signed_evidence_url',
+            report_id: String(item.reportId),
+            path: ref.path,
+            kind: isIdentity ? 'identity' : 'evidence'
+          }
+        });
+        const edgeData = edgeResult?.data;
+        if (!edgeResult?.error && edgeData?.success && edgeData?.signed_url) {
+          return edgeData.signed_url;
+        }
+        console.warn(
+          'Signed URL melalui Edge Function belum berhasil; mencoba akses Storage sebagai cadangan:',
+          edgeData?.message || edgeResult?.error?.message || 'Respons tidak lengkap.'
+        );
+      } catch (edgeError) {
+        console.warn('Edge Function pratinjau foto tidak dapat dipanggil; mencoba akses Storage sebagai cadangan:', edgeError);
+      }
+    }
+
     const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
     if (!error && data?.signedUrl) return data.signedUrl;
 
