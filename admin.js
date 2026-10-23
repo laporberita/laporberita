@@ -261,7 +261,7 @@
         const key = String(value).trim();
         if (!key || seen.has(key)) return;
         seen.add(key);
-        output.push({ field, value: key, kind });
+        output.push({ field, value: key, kind, reportId: report.id || null });
       });
     });
     return output;
@@ -363,10 +363,38 @@
     }
 
     const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
-    if (error || !data?.signedUrl) {
-      throw error || new Error('Tautan foto privat tidak tersedia.');
+    if (!error && data?.signedUrl) return data.signedUrl;
+
+    // Fallback terarah: fungsi kirim-laporan-berita menyimpan objek di
+    // folder bernama ID laporan (report.id). Jika evidence_path lama hanya
+    // menyimpan folder atau nama objeknya tidak persis cocok, cari berkas
+    // media di folder privat laporan itu. Fungsi ini hanya dipanggil dari
+    // panel setelah hak admin diverifikasi; berkas tetap privat dan hanya
+    // diberi signed URL singkat.
+    const firstError = error?.message || 'Tautan foto privat tidak tersedia.';
+    if (ref.bucket === 'laporan-bukti' && item.reportId) {
+      const folder = String(item.reportId).trim();
+      const { data: entries, error: listError } = await db.storage
+        .from('laporan-bukti')
+        .list(folder, { limit: 100, sortBy: { column: 'name', order: 'asc' } });
+
+      if (!listError && Array.isArray(entries)) {
+        const mediaEntries = entries.filter(entry => {
+          const name = String(entry?.name || '');
+          return /\.(jpg|jpeg|png|webp|mp4|webm)$/i.test(name) && !name.startsWith('.');
+        });
+        for (const entry of mediaEntries) {
+          const candidate = folder + '/' + entry.name;
+          const retry = await db.storage.from('laporan-bukti').createSignedUrl(candidate, 300);
+          if (!retry.error && retry.data?.signedUrl) return retry.data.signedUrl;
+        }
+      }
+      if (listError) {
+        console.error('Tidak dapat memeriksa folder bukti laporan:', listError.message);
+      }
     }
-    return data.signedUrl;
+
+    throw new Error(firstError + ' Jalur tersimpan: ' + ref.path + '. Folder bukti laporan juga sudah diperiksa.');
   }
 
   async function renderReportMediaGroup(container, items, heading, isIdentity = false) {
