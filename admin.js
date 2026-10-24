@@ -368,32 +368,6 @@
       return db.storage.from(ref.bucket).getPublicUrl(ref.path).data?.publicUrl || null;
     }
 
-    // Utamakan Edge Function untuk membuat signed URL foto privat.
-    // Ini menggunakan verifikasi admin di server dan menghindari kegagalan
-    // pratinjau akibat akses Storage langsung dari browser.
-    if (ref.bucket === 'laporan-bukti' && item.reportId) {
-      try {
-        const edgeResult = await db.functions.invoke('kirim-laporan-berita', {
-          body: {
-            action: 'admin_signed_evidence_url',
-            report_id: String(item.reportId),
-            path: ref.path,
-            kind: isIdentity ? 'identity' : 'evidence'
-          }
-        });
-        const edgeData = edgeResult?.data;
-        if (!edgeResult?.error && edgeData?.success && edgeData?.signed_url) {
-          return edgeData.signed_url;
-        }
-        console.warn(
-          'Signed URL melalui Edge Function belum berhasil; mencoba akses Storage sebagai cadangan:',
-          edgeData?.message || edgeResult?.error?.message || 'Respons tidak lengkap.'
-        );
-      } catch (edgeError) {
-        console.warn('Edge Function pratinjau foto tidak dapat dipanggil; mencoba akses Storage sebagai cadangan:', edgeError);
-      }
-    }
-
     const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
     if (!error && data?.signedUrl) return data.signedUrl;
 
@@ -777,6 +751,7 @@
 
     setActionBusy(true);
     message('article-message', status === 'published' ? 'Menerbitkan berita ke publik…' : 'Menyimpan berita…');
+    let reportPhotoNote = '';
     try {
       const authorized = await verifyAdmin();
       if (!authorized) throw new Error('Sesi admin tidak aktif. Login kembali.');
@@ -786,8 +761,30 @@
       const now = new Date().toISOString();
       const location = getLocationValues();
       const oldMediaUrls = parseMediaUrls(existing?.media_urls);
+
+      // Saat draf berasal dari laporan masyarakat, pastikan image_path berisi
+      // URL publik sebelum artikel berstatus published. Foto bukti di bucket
+      // laporan-bukti tetap privat; salin melalui Edge Function yang memeriksa admin.
+      let imageForSave = status === 'published'
+        ? (safeExistingPublicImage(imageUrl || existing?.image_path) || null)
+        : (imageUrl || existing?.image_path || null);
+
+      if (status === 'published' && sourceReportId && !mainImageFile && !imageForSave) {
+        const sourceReport = reports.find(item => String(item.id) === String(sourceReportId));
+        if (!sourceReport) {
+          throw new Error('Laporan sumber tidak ditemukan. Muat ulang laporan, lalu pilih “Jadikan Draf” kembali.');
+        }
+        message('article-message', 'Menyalin foto laporan ke bucket publik berita-media…');
+        const copiedPhoto = await copyReportPhotoForPublication(sourceReport);
+        if (!copiedPhoto?.url) {
+          throw new Error('Foto laporan belum dapat disalin ke media publik. Berita tidak diterbitkan agar tidak tayang tanpa foto. Periksa foto pada menu Tinjau dan coba lagi.');
+        }
+        imageForSave = copiedPhoto.url;
+        reportPhotoNote = copiedPhoto.note || 'Foto laporan berhasil disalin ke bucket publik berita-media.';
+      }
+
       message('article-message', 'Mengunggah foto utama dan foto/video tambahan…');
-      imageUrl = await uploadMainImage(mainImageFile, id || slug, imageUrl || existing?.image_path || null);
+      imageUrl = await uploadMainImage(mainImageFile, id || slug, imageForSave);
       const mediaUrls = await uploadSelectedMedia(id || slug, oldMediaUrls);
       const coreRecord = {
         title: title,
@@ -853,7 +850,7 @@
       await refreshAll();
       if (status === 'published') {
         const link = savedId ? ' Tautan publik: ' + new URL('artikel.html?id=' + encodeURIComponent(savedId), locationHref()).href : '';
-        message('article-message', 'BERHASIL DITERBITKAN. Berita sekarang berstatus publik.' + link + (locationWarning ? ' ' + locationWarning : '') + reportWarning);
+        message('article-message', 'BERHASIL DITERBITKAN. Berita sekarang berstatus publik.' + link + (reportPhotoNote ? ' ' + reportPhotoNote : '') + (locationWarning ? ' ' + locationWarning : '') + reportWarning);
       } else {
         message('article-message', 'Berita berhasil disimpan dengan status “' + status + '”. Formulir tetap terbuka agar dapat dilanjutkan atau diterbitkan setelah diperiksa.' + (locationWarning ? ' ' + locationWarning : ''));
       }
