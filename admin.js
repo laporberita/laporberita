@@ -368,15 +368,61 @@
       return db.storage.from(ref.bucket).getPublicUrl(ref.path).data?.publicUrl || null;
     }
 
+    // Gunakan Edge Function yang memverifikasi sesi admin di server sebelum
+    // membuat signed URL. Cara ini tetap bekerja ketika kebijakan Storage
+    // tidak mengizinkan browser membuat signed URL secara langsung (yang dapat
+    // terlihat sebagai "Object not found" meskipun objek benar-benar ada).
+    let serverSignedError = null;
+    const reportId = String(item.reportId || activeReport?.id || '').trim();
+    if (reportId) {
+      try {
+        const result = await db.functions.invoke('kirim-laporan-berita', {
+          body: {
+            action: 'admin_signed_evidence_url',
+            report_id: reportId,
+            path: item.value,
+            kind: isIdentity ? 'identity' : 'evidence'
+          }
+        });
+
+        if (result.error) {
+          let detail = result.error.message || 'Permintaan URL foto privat gagal.';
+          try {
+            const response = result.error.context;
+            if (response && typeof response.json === 'function') {
+              const payload = await response.json();
+              if (payload?.message) detail = payload.message;
+            }
+          } catch (_) {
+            // Pertahankan pesan SDK jika respons tidak dapat dibaca sebagai JSON.
+          }
+          throw new Error(detail);
+        }
+
+        const payload = result.data;
+        if (!payload?.success || !payload?.signed_url) {
+          throw new Error(payload?.message || 'Server tidak mengembalikan tautan privat.');
+        }
+
+        const signed = new URL(payload.signed_url);
+        const projectOrigin = new URL(cfg.SUPABASE_URL).origin;
+        if (signed.origin !== projectOrigin ||
+            !/\/storage\/v1\/object\/sign\/laporan-bukti\//i.test(signed.pathname)) {
+          throw new Error('Server mengembalikan tautan foto privat yang tidak sesuai.');
+        }
+        return signed.href;
+      } catch (error) {
+        serverSignedError = error;
+        console.warn('Signed URL lewat Edge Function belum berhasil; mencoba cara lama sebagai cadangan:', error?.message || error);
+      }
+    }
+
+    // Cadangan kompatibilitas: tetap mencoba cara Storage browser apabila
+    // izin proyek mengizinkannya. Ini tidak menggantikan pemeriksaan admin di
+    // Edge Function dan tidak membuat bucket privat menjadi publik.
     const { data, error } = await db.storage.from(ref.bucket).createSignedUrl(ref.path, 300);
     if (!error && data?.signedUrl) return data.signedUrl;
 
-    // Fallback terarah: fungsi kirim-laporan-berita menyimpan objek di
-    // folder bernama ID laporan (report.id). Jika evidence_path lama hanya
-    // menyimpan folder atau nama objeknya tidak persis cocok, cari berkas
-    // media di folder privat laporan itu. Fungsi ini hanya dipanggil dari
-    // panel setelah hak admin diverifikasi; berkas tetap privat dan hanya
-    // diberi signed URL singkat.
     const firstError = error?.message || 'Tautan foto privat tidak tersedia.';
     if (ref.bucket === 'laporan-bukti' && item.reportId) {
       const folder = String(item.reportId).trim();
@@ -400,7 +446,8 @@
       }
     }
 
-    throw new Error(firstError + ' Jalur tersimpan: ' + ref.path + '. Folder bukti laporan juga sudah diperiksa.');
+    const serverDetail = serverSignedError?.message ? ' Layanan foto admin: ' + serverSignedError.message + '.' : '';
+    throw new Error(firstError + ' Jalur tersimpan: ' + ref.path + '. Folder bukti laporan juga sudah diperiksa.' + serverDetail);
   }
 
   async function renderReportMediaGroup(container, items, heading, isIdentity = false) {
@@ -1032,6 +1079,63 @@
     panel?.scrollIntoView({ behavior: 'smooth' });
   }
 
+  async function previewReportPhotoInDraft(report) {
+    const preview = $('image-preview');
+    if (!preview) return;
+    preview.replaceChildren();
+
+    const status = document.createElement('p');
+    status.className = 'muted';
+    status.textContent = 'Memuat pratinjau foto bukti privat…';
+    preview.appendChild(status);
+
+    const candidate = getPrivateImageEvidenceCandidate(report);
+    if (!candidate) {
+      status.textContent = 'Tidak ditemukan foto bukti privat yang cocok untuk laporan ini. Foto asli tetap privat; periksa bagian Tinjau laporan.';
+      return;
+    }
+
+    try {
+      const url = await getReportMediaUrl(candidate, false);
+      // Jangan memasang pratinjau yang terlambat untuk laporan lain jika admin
+      // sudah menekan tombol Jadikan Draf pada laporan berbeda.
+      if (String($('source-report-id')?.value || '') !== String(report.id)) return;
+      preview.replaceChildren();
+
+      const caption = document.createElement('p');
+      caption.className = 'muted';
+      caption.textContent = 'Pratinjau foto bukti laporan (privat, hanya untuk admin). Foto ini tidak disimpan sebagai URL publik.';
+      preview.appendChild(caption);
+
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'Pratinjau privat foto bukti laporan masyarakat';
+      img.loading = 'eager';
+      img.style.cssText = 'display:block;max-width:100%;max-height:260px;height:auto;border-radius:8px;background:#f3f6f9;';
+      img.addEventListener('error', () => {
+        const note = document.createElement('p');
+        note.className = 'status';
+        note.textContent = 'Foto tidak berhasil dimuat pada pratinjau. Coba buka kembali bagian Tinjau laporan.';
+        img.replaceWith(note);
+      }, { once: true });
+      preview.appendChild(img);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Buka pratinjau foto privat di tab baru (tautan berlaku 5 menit)';
+      preview.appendChild(link);
+    } catch (error) {
+      preview.replaceChildren();
+      const note = document.createElement('p');
+      note.className = 'status';
+      note.textContent = 'Pratinjau foto belum dapat dimuat: ' + (error?.message || 'kesalahan akses');
+      preview.appendChild(note);
+      console.error('Pratinjau foto draf gagal:', error);
+    }
+  }
+
   function useReportAsDraft(id) {
     const report = reports.find(item => String(item.id) === String(id));
     if (!report) return;
@@ -1042,7 +1146,8 @@
     $('status').value = 'draft';
     $('source-report-id').value = report.id;
     if ($('form-title')) $('form-title').textContent = 'Periksa Laporan — Simpan sebagai Draf';
-    message('article-message', 'Laporan dimasukkan sebagai draf. Verifikasi fakta dan sunting terlebih dahulu. Tombol “Terbitkan ke Publik” akan menerbitkan berita dan mencoba menandai laporan sebagai disetujui.');
+    message('article-message', 'Laporan dimasukkan sebagai draf. Memuat pratinjau privat; foto asli tidak diubah menjadi publik saat menyimpan draf. Verifikasi fakta sebelum diterbitkan.');
+    void previewReportPhotoInDraft(report);
     $('article-form')?.scrollIntoView({ behavior: 'smooth' });
   }
 
